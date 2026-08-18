@@ -60,6 +60,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=os.environ.get("MLX_WHISPER_BIN", "mlx_whisper"),
         help="mlx_whisper executable name or path (default: mlx_whisper)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed MLX Whisper arguments and segment output",
+    )
     return parser.parse_args(argv)
 
 
@@ -123,11 +128,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         output_name,
         "--output-dir",
         str(out_dir),
+        "--verbose",
+        str(args.verbose),
     ]
     if not args.auto_language:
         command.extend(["--language", args.language])
 
-    print(f"Transcribing: {source.name}")
+    print(f"Transcribing: {source.name}", flush=True)
     try:
         subprocess.run(command, check=True)
     except KeyboardInterrupt:

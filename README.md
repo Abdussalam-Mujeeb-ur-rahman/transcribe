@@ -188,7 +188,7 @@ export MLX_WHISPER_MODEL="mlx-community/whisper-small-mlx"
 usage: transcribe [-h] [--out-dir OUT_DIR]
                   [--format {txt,srt,vtt,tsv,json,all}]
                   [--language LANGUAGE] [--auto-language]
-                  [--model MODEL] [--whisper-bin WHISPER_BIN]
+                  [--model MODEL] [--whisper-bin WHISPER_BIN] [--verbose]
                   input
 
 positional arguments:
@@ -202,7 +202,12 @@ options:
   --auto-language       Let Whisper detect the spoken language
   --model MODEL         Hugging Face model name or local model path
   --whisper-bin PATH    mlx_whisper executable name or explicit path
+  --verbose             Show detailed MLX Whisper arguments and segments
 ```
+
+Normal runs show transcription progress without dumping MLX Whisper's internal
+argument dictionary or every segment to Terminal. Add `--verbose` when that
+detailed diagnostic output is useful.
 
 `MLX_WHISPER_BIN` can set a default executable name or path. A command-line
 option overrides the environment variable. The tool searches `PATH` first and

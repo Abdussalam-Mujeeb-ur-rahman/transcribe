@@ -41,6 +41,13 @@ class TranscribeMediaTests(unittest.TestCase):
         self.assertIn("usage: transcribe", result.stdout)
         self.assertNotIn("usage: transcribe_media.py", result.stdout)
 
+    def test_verbose_flag_is_opt_in(self) -> None:
+        default_args = transcribe_media.parse_args(["sample.wav"])
+        verbose_args = transcribe_media.parse_args(["sample.wav", "--verbose"])
+
+        self.assertFalse(default_args.verbose)
+        self.assertTrue(verbose_args.verbose)
+
     def test_custom_output_directory_is_created_and_forwarded(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -71,6 +78,7 @@ class TranscribeMediaTests(unittest.TestCase):
                 command[command.index("--output-name") + 1],
                 "sample-audio_transcript",
             )
+            self.assertEqual(command[command.index("--verbose") + 1], "False")
 
 
 if __name__ == "__main__":
