@@ -1,0 +1,41 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Model and tool caches
+.cache/
+models/
+
+# Recordings and generated transcript output
+*.aif
+*.aiff
+*.flac
+*.m4a
+*.mp3
+*.mp4
+*.mov
+*.ogg
+*.opus
+*.wav
+*_transcript.txt
+*_transcript.srt
+*_transcript.vtt
+*_transcript.tsv
+*_transcript.json
+test-output/
+tmp/
