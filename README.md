@@ -19,6 +19,11 @@ Open the generated TXT file to read the transcript:
 
 ![Generated transcript opened as a text file](docs/images/transcript-output-demo.png)
 
+Drag a voice note from Finder into Terminal, transcribe it, and open the saved
+TXT result:
+
+![Finder drag-and-drop transcription workflow with the generated transcript](docs/images/finder-drag-and-drop-demo.png)
+
 ## Privacy
 
 Transcription runs on your Mac. Recordings are not sent to a hosted
