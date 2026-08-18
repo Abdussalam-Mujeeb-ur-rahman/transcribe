@@ -26,7 +26,7 @@ def output_name_for(source: Path) -> str:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="transcribe",
-        description="Create a timestamped local transcript from an audio or video file.",
+        description="Create a local transcript from an audio or video file.",
     )
     parser.add_argument("input", type=Path, help="Path to an audio or video file")
     parser.add_argument(
@@ -73,10 +73,14 @@ def find_executable(value: str) -> str | None:
     if candidate.is_file() and os.access(candidate, os.X_OK):
         return str(candidate.resolve())
 
-    # `pip install --user` places scripts here on macOS, but that directory is
-    # not always added to PATH. Discover it without hard-coding a username or
-    # Python version.
+    # Some existing `pip install --user` setups place scripts here on macOS,
+    # but do not add the directory to PATH. Discover it without hard-coding a
+    # username or Python version.
     if value == "mlx_whisper":
+        pipx_candidate = Path.home() / ".local" / "bin" / "mlx_whisper"
+        if pipx_candidate.is_file() and os.access(pipx_candidate, os.X_OK):
+            return str(pipx_candidate.resolve())
+
         user_scripts = Path.home() / "Library" / "Python"
         for candidate in sorted(
             user_scripts.glob("*/bin/mlx_whisper"), reverse=True
