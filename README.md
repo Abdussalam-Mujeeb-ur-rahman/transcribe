@@ -9,6 +9,16 @@ recordings. It supports OPUS, OGG, M4A, MP3, WAV, MP4, and MOV input through
 FFmpeg. Other FFmpeg-compatible formats may also work but are not part of the
 tested interface.
 
+## Demo
+
+Run `transcribe --help`, then transcribe a file directly from Terminal:
+
+![Transcribe command-line help and a completed local transcription](docs/images/transcribe-terminal-demo.png)
+
+Open the generated TXT file to read the transcript:
+
+![Generated transcript opened as a text file](docs/images/transcript-output-demo.png)
+
 ## Privacy
 
 Transcription runs on your Mac. Recordings are not sent to a hosted
