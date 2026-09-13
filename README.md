@@ -42,7 +42,7 @@ transcribe --help
 
 ## Fast updates
 
-If `transcribe` is already installed, get the latest project command with:
+After version 1.1.0 is installed, get future project updates with:
 
 ```bash
 transcribe --update
@@ -52,6 +52,12 @@ This downloads and validates only the latest small `transcribe` script. It
 does **not** reinstall Homebrew, Python, FFmpeg, `pipx`, MLX Whisper, or any
 downloaded model, so an update should be much faster than first-time setup.
 Your existing model cache and transcripts remain untouched.
+
+If you installed an older version that says `unrecognized arguments: --update`,
+run the one-command setup once more. The installer checks what is already on
+the Mac and skips Homebrew, Python, FFmpeg, `pipx`, and MLX Whisper when they
+are present; it replaces only the project command. After that one-time upgrade,
+use `transcribe --update` for future releases.
 
 ## Demo
 
