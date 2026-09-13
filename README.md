@@ -40,23 +40,32 @@ When setup finishes, start with:
 transcribe
 ```
 
-## Simple interface or Terminal
+## Transcribe Lab or Terminal
 
 Run `transcribe` without a file to choose how you want to continue:
 
 ```text
 Welcome to Transcribe
 
-1) Open the simple interface
+1) Open Transcribe Lab
 2) Continue with guided Terminal mode
 3) Show command help
 ```
 
-The simple interface opens locally in your default browser. Choose an audio or
-video file with the native macOS picker, select transcription or translation
-to English, choose the spoken language, output format and folder, and follow
-progress on the page. The browser does not upload or copy the recording; the
-existing command processes its path directly on your Mac.
+**Transcribe Lab** is the local visual workspace. Add one or several media
+files, confirm the real duration, size, format, sample rate and channel count,
+preview the selected recording, and inspect its generated waveform. Click the
+waveform to seek, or enable **Transcribe selection** and drag across it to run
+only a specific range. Choose transcription or translation to English, the
+spoken language, output format and folder, then follow percentage, elapsed
+time, estimated remaining time, processing speed and the live process stream.
+
+The interface also shows the exact equivalent `transcribe` command. Its dark
+theme is designed for a code-focused workspace; use the sun button for the
+lighter long-session theme. The browser does not upload or copy recordings.
+It talks only to a temporary localhost server, while FFmpeg and MLX Whisper
+process the original paths on your Mac. **LOCAL / PRIVATE — ENFORCED** cannot
+be turned off because this project has no cloud transcription mode.
 
 Open either experience directly with:
 
@@ -65,9 +74,13 @@ transcribe --ui
 transcribe --guided
 ```
 
-Keep the launching Terminal window open while the simple interface is running.
+Keep the launching Terminal window open while Transcribe Lab is running.
 Use **Quit local interface** on the page when finished. Existing file-based
 commands continue to work exactly as before.
+
+Browser playback depends on the media codecs supported by the browser. If a
+file cannot play in the preview control, its waveform and transcription may
+still work because those use FFmpeg rather than the browser decoder.
 
 ## Fast updates
 
@@ -174,6 +187,20 @@ creates and uses another directory:
 transcribe "/path/to/recording.mov" \
   --out-dir "$HOME/Documents/Transcripts"
 ```
+
+## Transcribe only part of a recording
+
+Select a range visually in Transcribe Lab, or provide start and end times in
+seconds from Terminal:
+
+```bash
+transcribe "/path/to/interview.wav" --start-at 222 --end-at 491 --format srt
+```
+
+This creates a separately named result such as
+`interview_clip-222-to-491_transcript.srt`; the source media is unchanged.
+Both values are required, the start must be zero or greater, and the end must
+be later than the start.
 
 ## Output formats
 
@@ -338,6 +365,7 @@ at transcription and is not recommended for translation.
 usage: transcribe [-h] [--out-dir OUT_DIR]
                   [--format {txt,srt,vtt,tsv,json,all}]
                   [--language LANGUAGE] [--auto-language]
+                  [--start-at START_AT] [--end-at END_AT]
                   [--translate-to {en}] [--update] [--ui] [--guided]
                   [--version]
                   [--model MODEL] [--whisper-bin WHISPER_BIN] [--verbose]
@@ -352,9 +380,11 @@ options:
   --format FORMAT       txt, srt, vtt, tsv, json, or all; defaults to txt
   --language LANGUAGE   Spoken language code; defaults to en
   --auto-language       Let Whisper detect the spoken language
+  --start-at SECONDS    Start time for a selected media range
+  --end-at SECONDS      End time for a selected media range
   --translate-to en     Translate supported non-English speech into English
   --update              Update the command without reinstalling dependencies
-  --ui                  Open the simple local interface in your browser
+  --ui                  Open the Transcribe Lab interface in your browser
   --guided              Start an interactive guided Terminal session
   --version             Show the installed transcribe version
   --model MODEL         Hugging Face model name or local model path

@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import array
 import json
+import mimetypes
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -14,16 +17,18 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional, Sequence
 
 
-VERSION = "1.3.0"
+VERSION = "2.0.0"
 DEFAULT_MODEL = "mlx-community/whisper-small-mlx"
 OUTPUT_FORMATS = ("txt", "srt", "vtt", "tsv", "json", "all")
 SUPPORTED_LANGUAGES = {
@@ -77,12 +82,22 @@ RAW_SCRIPT_URL = (
 )
 
 
-def output_name_for(source: Path, translated_to_english: bool = False) -> str:
+def output_name_for(
+    source: Path,
+    translated_to_english: bool = False,
+    start_at: float | None = None,
+    end_at: float | None = None,
+) -> str:
     """Return the extension-free transcript name used by MLX Whisper."""
     # mlx_whisper treats dots in --output-name as extension separators.
     safe_stem = source.stem.replace(".", "-")
+    clip = ""
+    if start_at is not None and end_at is not None:
+        start_slug = f"{start_at:.3f}".rstrip("0").rstrip(".").replace(".", "p")
+        end_slug = f"{end_at:.3f}".rstrip("0").rstrip(".").replace(".", "p")
+        clip = f"_clip-{start_slug}-to-{end_slug}"
     suffix = "_english_translation" if translated_to_english else "_transcript"
-    return f"{safe_stem}{suffix}"
+    return f"{safe_stem}{clip}{suffix}"
 
 
 def install_dir() -> Path:
@@ -123,6 +138,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Let Whisper detect the spoken language",
     )
     parser.add_argument(
+        "--start-at",
+        type=float,
+        help="Start time in seconds for a selected media range",
+    )
+    parser.add_argument(
+        "--end-at",
+        type=float,
+        help="End time in seconds for a selected media range",
+    )
+    parser.add_argument(
         "--translate-to",
         choices=("en",),
         help="Translate supported non-English speech into English",
@@ -135,7 +160,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--ui",
         action="store_true",
-        help="Open the simple local interface in your browser",
+        help="Open the Transcribe Lab interface in your browser",
     )
     parser.add_argument(
         "--guided",
@@ -251,13 +276,127 @@ def choose_with_macos(prompt: str, folder: bool = False) -> Path | None:
     return Path(value) if value else None
 
 
+def choose_files_with_macos(prompt: str) -> list[Path]:
+    """Open a native multi-file picker and return selected POSIX paths."""
+    script = f'''
+set chosenFiles to choose file with prompt "{prompt}" with multiple selections allowed
+set outputText to ""
+repeat with chosenFile in chosenFiles
+    set outputText to outputText & POSIX path of chosenFile & linefeed
+end repeat
+return outputText
+'''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return [Path(line) for line in result.stdout.splitlines() if line.strip()]
+
+
+def inspect_media(source: Path) -> dict[str, object]:
+    """Read real duration, size, format, sample rate, and channels with FFprobe."""
+    ffprobe = find_executable("ffprobe")
+    if ffprobe is None:
+        raise RuntimeError("FFprobe was not found. Rerun the installer to repair FFmpeg.")
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration,size,format_name:stream=codec_type,sample_rate,channels",
+            "-of",
+            "json",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    media_format = payload.get("format", {})
+    audio_stream = next(
+        (
+            stream
+            for stream in payload.get("streams", [])
+            if stream.get("codec_type") == "audio"
+        ),
+        {},
+    )
+    return {
+        "name": source.name,
+        "path": str(source),
+        "duration": float(media_format.get("duration") or 0),
+        "size": int(media_format.get("size") or source.stat().st_size),
+        "format": str(media_format.get("format_name") or source.suffix.lstrip(".")),
+        "sample_rate": int(audio_stream.get("sample_rate") or 0),
+        "channels": int(audio_stream.get("channels") or 0),
+    }
+
+
+def waveform_peaks(source: Path, bin_count: int = 900) -> list[float]:
+    """Decode a low-rate mono stream and reduce it to normalized waveform peaks."""
+    ffmpeg = find_executable("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg was not found. Rerun the installer to repair it.")
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-i",
+            str(source),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "200",
+            "-f",
+            "s16le",
+            "pipe:1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    samples = array.array("h")
+    samples.frombytes(result.stdout)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return [0.0] * bin_count
+    bucket_size = max(1, len(samples) // bin_count)
+    raw_peaks: list[int] = []
+    for index in range(bin_count):
+        start = index * bucket_size
+        end = len(samples) if index == bin_count - 1 else min(
+            len(samples), start + bucket_size
+        )
+        raw_peaks.append(max((abs(value) for value in samples[start:end]), default=0))
+    ceiling = max(raw_peaks, default=0)
+    if not ceiling:
+        return [0.0] * bin_count
+    return [round(min(1.0, peak / ceiling), 4) for peak in raw_peaks]
+
+
 def expected_output_path(
-    source: Path, out_dir: Path, output_format: str, translate: bool
+    source: Path,
+    out_dir: Path,
+    output_format: str,
+    translate: bool,
+    start_at: float | None = None,
+    end_at: float | None = None,
 ) -> Path:
     if output_format == "all":
         output_format = "txt"
     return out_dir / (
-        f"{output_name_for(source, translated_to_english=translate)}.{output_format}"
+        f"{output_name_for(source, translated_to_english=translate, start_at=start_at, end_at=end_at)}.{output_format}"
     )
 
 
@@ -270,13 +409,32 @@ class LocalJob:
         self.state = "idle"
         self.log: list[str] = []
         self.output_path: Path | None = None
+        self.started_at: float | None = None
+        self.progress = 0.0
+        self.media_duration = 0.0
+        self.selected_frame_total = 0
 
     def snapshot(self) -> dict[str, object]:
         with self.lock:
+            elapsed = max(0.0, time.monotonic() - self.started_at) if self.started_at else 0.0
+            speed = (
+                (self.media_duration * self.progress / elapsed)
+                if elapsed > 0 and self.progress > 0
+                else 0.0
+            )
+            remaining = (
+                elapsed * (1 - self.progress) / self.progress
+                if self.state == "running" and self.progress > 0
+                else 0.0
+            )
             return {
                 "state": self.state,
                 "log": "".join(self.log[-400:]),
                 "output": str(self.output_path) if self.output_path else "",
+                "progress": round(self.progress * 100),
+                "elapsed": round(elapsed),
+                "remaining": round(remaining),
+                "speed": round(speed, 2),
             }
 
     def start(
@@ -286,6 +444,9 @@ class LocalJob:
         output_format: str,
         language: str,
         translate: bool,
+        media_duration: float = 0.0,
+        start_at: float | None = None,
+        end_at: float | None = None,
     ) -> tuple[bool, str]:
         with self.lock:
             if self.process is not None and self.process.poll() is None:
@@ -299,6 +460,11 @@ class LocalJob:
             return False, "Choose a valid language."
         if translate and language == "en":
             return False, "Choose a non-English source language or automatic detection."
+        if start_at is not None or end_at is not None:
+            if start_at is None or end_at is None or start_at < 0 or end_at <= start_at:
+                return False, "Choose a valid start and end time."
+            if media_duration and end_at > media_duration + 0.5:
+                return False, "The selected range exceeds the media duration."
 
         out_dir.mkdir(parents=True, exist_ok=True)
         command = [
@@ -316,12 +482,26 @@ class LocalJob:
             command.extend(["--language", language])
         if translate:
             command.extend(["--translate-to", "en"])
+        if start_at is not None and end_at is not None:
+            command.extend(["--start-at", str(start_at), "--end-at", str(end_at)])
 
         with self.lock:
             self.state = "running"
             self.log = [f"Starting {source.name}…\n"]
+            self.started_at = time.monotonic()
+            self.progress = 0.0
+            self.media_duration = (
+                end_at - start_at
+                if start_at is not None and end_at is not None
+                else media_duration
+            )
+            self.selected_frame_total = (
+                max(1, round(self.media_duration * 100))
+                if start_at is not None and end_at is not None
+                else 0
+            )
             self.output_path = expected_output_path(
-                source, out_dir, output_format, translate
+                source, out_dir, output_format, translate, start_at, end_at
             )
             try:
                 self.process = subprocess.Popen(
@@ -349,6 +529,16 @@ class LocalJob:
             for line in process.stdout:
                 with self.lock:
                     self.log.append(line)
+                    frame_progress = re.search(r"(\d+)/(\d+).*frames/s", line)
+                    if frame_progress and int(frame_progress.group(2)):
+                        denominator = (
+                            self.selected_frame_total
+                            or int(frame_progress.group(2))
+                        )
+                        self.progress = min(
+                            0.99,
+                            int(frame_progress.group(1)) / denominator,
+                        )
         return_code = process.wait()
         with self.lock:
             if self.state == "cancelling":
@@ -356,6 +546,7 @@ class LocalJob:
                 self.log.append("Cancelled.\n")
             elif return_code == 0:
                 self.state = "success"
+                self.progress = 1.0
             else:
                 self.state = "error"
                 self.log.append(f"Exited with status {return_code}.\n")
@@ -373,44 +564,53 @@ class LocalJob:
 
 
 UI_TEMPLATE = r'''<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Transcribe</title>
+<meta name="description" content="Local Apple silicon transcription workspace">
+<title>Transcribe Lab</title>
 <style>
-:root{color-scheme:light dark;--bg:#f3f4f6;--panel:#fff;--text:#17202a;--muted:#667085;--line:#d9dee7;--accent:#2563eb;--soft:#eff6ff;--danger:#b42318}
-@media(prefers-color-scheme:dark){:root{--bg:#111318;--panel:#1b1e24;--text:#f3f4f6;--muted:#a8b0bd;--line:#343a46;--soft:#17264a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:760px;margin:48px auto;padding:0 20px}.brand{display:flex;gap:14px;align-items:center;margin-bottom:24px}.icon{width:48px;height:48px;border-radius:14px;background:linear-gradient(145deg,#4f8cff,#164bc1);display:grid;place-items:center;color:white;font-size:25px}.brand h1{font-size:28px;margin:0}.brand p{color:var(--muted);margin:4px 0 0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 12px 32px rgba(15,23,42,.06)}label{font-weight:650;display:block;margin:18px 0 8px}.row{display:grid;grid-template-columns:1fr auto;gap:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-input,select,button{font:inherit;border-radius:10px;border:1px solid var(--line);min-height:44px}input,select{width:100%;padding:10px 12px;background:var(--panel);color:var(--text)}input[readonly]{color:var(--muted)}button{padding:10px 16px;background:var(--panel);color:var(--text);cursor:pointer;font-weight:650}button:hover{border-color:var(--accent)}button.primary{background:var(--accent);border-color:var(--accent);color:white;width:100%;margin-top:22px}button:disabled{opacity:.55;cursor:not-allowed}.mode{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mode button.active{background:var(--soft);border-color:var(--accent);color:var(--accent)}
-.status{display:none;margin-top:18px;padding:16px;border-radius:12px;background:var(--bg)}.status.show{display:block}.status-line{display:flex;justify-content:space-between;align-items:center}.badge{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}pre{white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;color:var(--muted);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;margin:12px 0 0}.actions{display:flex;gap:8px;margin-top:12px}.actions button{min-height:36px;padding:6px 12px}.privacy{text-align:center;color:var(--muted);font-size:13px;margin:16px}.error{color:var(--danger);margin-top:12px}.footer{display:flex;justify-content:center;margin-top:14px}.footer button{border:0;background:transparent;color:var(--muted);font-weight:500}
-@media(max-width:600px){main{margin:24px auto}.grid,.mode{grid-template-columns:1fr}.card{padding:18px}}
+:root{color-scheme:dark;--bg:#0d0d0c;--panel:#131412;--panel2:#191a17;--line:#34352f;--text:#f1f0e8;--muted:#989990;--amber:#f0ae3c;--amber-soft:#3a2b12;--lime:#b9f54a;--danger:#ff6961;--shadow:rgba(0,0,0,.4)}
+:root[data-theme="light"]{color-scheme:light;--bg:#f2f0e9;--panel:#fffdf7;--panel2:#ebe8df;--line:#cbc7ba;--text:#1e211b;--muted:#66695f;--amber:#a65f00;--amber-soft:#fff0cd;--lime:#4e7900;--danger:#b42318;--shadow:rgba(54,45,24,.12)}
+:root[data-theme="light"] .run{color:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;min-height:100vh}button,input,select{font:inherit}button,select,input[type="number"]{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px}button{cursor:pointer;padding:9px 12px;font-weight:700}button:hover,button:focus-visible,select:focus-visible,input:focus-visible{border-color:var(--amber);outline:2px solid color-mix(in srgb,var(--amber) 35%,transparent);outline-offset:1px}button:disabled{opacity:.5;cursor:not-allowed}.shell{max-width:1500px;margin:auto;padding:18px}.topbar{height:54px;border:1px solid var(--line);border-radius:10px 10px 0 0;background:var(--panel);display:flex;align-items:center;justify-content:space-between;padding:0 18px;box-shadow:0 16px 40px var(--shadow)}.brand{font-size:17px;font-weight:800;letter-spacing:.08em}.brand b{color:var(--amber)}.tagline{color:var(--muted);font-size:11px;margin-left:14px}.local{color:var(--lime);font-size:11px;letter-spacing:.08em}.theme{margin-left:14px;background:transparent}.workspace{display:grid;grid-template-columns:240px minmax(420px,1fr) 340px;grid-template-areas:"library viewer settings" "process process settings";gap:10px;border:1px solid var(--line);border-top:0;padding:10px;background:#080907;border-radius:0 0 10px 10px;min-height:720px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:7px;min-width:0}.panel-title{padding:13px 14px;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;letter-spacing:.08em}.library{grid-area:library;display:flex;flex-direction:column}.add-media{margin:12px;border:1px dashed var(--line);background:transparent;color:var(--muted);min-height:94px}.add-media strong{display:block;color:var(--text);font-size:18px;margin-bottom:7px}.file-list{display:grid;gap:5px;padding:0 8px 10px;overflow:auto}.file{display:grid;grid-template-columns:1fr;gap:5px;text-align:left;background:transparent;padding:10px;border-color:transparent}.file.active{border-color:var(--amber);background:var(--amber-soft)}.file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-meta{font-size:10px;color:var(--muted)}.library-empty{padding:16px;color:var(--muted);font-size:11px;line-height:1.6}.privacy-stamp{margin:auto 12px 14px;padding-top:12px;border-top:1px solid var(--line);color:var(--lime);font-size:10px;line-height:1.5}.viewer{grid-area:viewer;padding:12px;display:flex;flex-direction:column;gap:10px}.media-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2)}.media-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.media-detail{font-size:10px;color:var(--muted);margin-top:5px}.ready{color:var(--lime);border:1px solid var(--lime);padding:3px 7px;border-radius:99px;font-size:9px}.wave-shell{position:relative;min-height:270px;border:1px solid var(--line);border-radius:6px;background:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:100% 25%,10% 100%;overflow:hidden}.wave-shell.empty{display:grid;place-items:center;color:var(--muted)}canvas{display:block;width:100%;height:270px;touch-action:none;cursor:crosshair}.wave-hint{position:absolute;left:12px;bottom:10px;color:var(--muted);font-size:10px;pointer-events:none}.selection{display:grid;grid-template-columns:auto 1fr 1fr;align-items:end;gap:9px;padding:9px;border:1px solid var(--line);border-radius:6px}.selection label{font-size:10px;color:var(--muted)}.selection input[type="number"]{width:100%;padding:7px;margin-top:4px}.selection-toggle{display:flex;gap:7px;align-items:center;padding-bottom:7px;color:var(--lime)!important}.player{width:100%;height:38px}.settings{grid-area:settings;padding-bottom:12px}.settings-body{padding:12px}.field{margin-bottom:13px}.field label{display:block;font-size:10px;color:var(--muted);margin-bottom:6px;letter-spacing:.08em}.field select,.field input[type="text"]{width:100%;min-height:38px;padding:8px}.path-row{display:grid;grid-template-columns:1fr auto;gap:5px}.path-row input{border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:6px;padding:8px;min-width:0}.enforced{display:flex;gap:8px;align-items:center;color:var(--lime);font-size:11px;margin:16px 0}.run{width:100%;background:var(--lime);border-color:var(--lime);color:#172000;min-height:48px;letter-spacing:.06em}.command{margin-top:14px;border:1px solid var(--line);border-radius:6px}.command summary{cursor:pointer;padding:9px;color:var(--muted);font-size:10px}.command pre{margin:0;padding:10px;border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;color:var(--amber);font-size:10px;line-height:1.6}.error{color:var(--danger);font-size:11px;line-height:1.5;margin-top:9px}.process{grid-area:process;min-height:220px}.process-grid{display:grid;grid-template-columns:1fr 300px;gap:14px;padding:12px}.log{margin:0;max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--muted);font-size:11px;line-height:1.55}.telemetry{border-left:1px solid var(--line);padding-left:14px}.progress-head{display:flex;justify-content:space-between;font-size:11px;margin-bottom:8px}.progress-track{height:8px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden}.progress-bar{height:100%;width:0;background:var(--lime);transition:width .2s}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:12px}.metric{padding:7px;background:var(--panel2);border-radius:5px;text-align:center}.metric b{display:block;color:var(--text);font-size:11px}.metric span{font-size:8px;color:var(--muted)}.job-actions{display:flex;gap:6px;margin-top:12px}.job-actions button{flex:1}.reveal{display:none;color:var(--lime)}.footer{text-align:center;color:var(--muted);font-size:9px;letter-spacing:.09em;padding:12px}.footer button{border:0;background:transparent;color:var(--muted);font-size:9px;letter-spacing:.09em;font-weight:500}.mobile-library{display:none}
+@media(max-width:1050px){.workspace{grid-template-columns:210px 1fr;grid-template-areas:"library viewer" "settings settings" "process process"}.settings-body{display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px}.run,.command,.enforced,.error{grid-column:1/-1}}
+@media(max-width:700px){.shell{padding:0}.topbar{border-radius:0;border-left:0;border-right:0}.tagline{display:none}.workspace{display:flex;flex-direction:column;border:0;border-radius:0;padding:8px;min-height:calc(100vh - 54px)}.library{order:1;min-height:auto}.viewer{order:2}.settings{order:3}.process{order:4}.file-list{max-height:150px}.privacy-stamp{display:none}.wave-shell,canvas{height:180px;min-height:180px}.settings-body{display:block}.process-grid{grid-template-columns:1fr}.telemetry{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.selection{grid-template-columns:1fr 1fr}.selection-toggle{grid-column:1/-1}.local{font-size:9px}.theme{padding:7px}.metrics{grid-template-columns:repeat(3,1fr)}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style>
 </head>
-<body><main>
-<div class="brand"><div class="icon">⌁</div><div><h1>Transcribe</h1><p>Private transcription on your Apple silicon Mac</p></div></div>
-<div class="card">
-<label for="source">Audio or video</label><div class="row"><input id="source" readonly placeholder="Choose a recording or movie"><button onclick="pickFile()">Choose file</button></div>
-<label>What should I do?</label><div class="mode"><button id="transcribeMode" class="active" aria-pressed="true" onclick="setMode(false)">Transcribe</button><button id="translateMode" aria-pressed="false" onclick="setMode(true)">Translate to English</button></div>
-<div class="grid"><div><label for="language">Spoken language</label><select id="language"><option value="auto">Detect automatically</option>__LANGUAGE_OPTIONS__</select></div><div><label for="format">Output format</label><select id="format"><option value="txt">TXT — readable text</option><option value="srt">SRT — video subtitles</option><option value="vtt">VTT — web subtitles</option><option value="tsv">TSV — timing data</option><option value="json">JSON — structured data</option><option value="all">All formats</option></select></div></div>
-<label for="outDir">Save location</label><div class="row"><input id="outDir" readonly placeholder="Beside the original file"><button onclick="pickFolder()">Choose folder</button></div>
-<button class="primary" id="start" onclick="startJob()">Start transcription</button><div id="error" class="error" role="alert"></div>
-<div id="status" class="status" aria-live="polite"><div class="status-line"><strong id="statusText">Preparing…</strong><span id="badge" class="badge">running</span></div><pre id="log"></pre><div class="actions"><button id="cancel" onclick="cancelJob()">Cancel</button><button id="reveal" onclick="reveal()" style="display:none">Show in Finder</button></div></div>
-</div><p class="privacy">Your recording stays on this Mac. Internet is needed only for first-time model downloads.</p><div class="footer"><button onclick="quitUi()">Quit local interface</button></div>
-</main>
+<body><div class="shell">
+<header class="topbar"><div><span class="brand">TRANSCRIBE <b>LAB</b></span><span class="tagline">// MEDIA IN. TEXT OUT. LOCALLY.</span></div><div><span class="local">● LOCAL / PRIVATE</span><button class="theme" id="themeButton" aria-label="Toggle light theme">☼</button></div></header>
+<main class="workspace">
+<aside class="panel library"><div class="panel-title">INPUT / MEDIA</div><button class="add-media" id="addMedia"><strong>＋</strong>ADD AUDIO OR VIDEO</button><div class="file-list" id="fileList"><div class="library-empty">No media loaded.<br>Select one or several files to begin.</div></div><div class="privacy-stamp">● LOCALHOST SECURED<br>FILES STAY ON THIS MAC</div></aside>
+<section class="panel viewer"><div class="media-head"><div><div class="media-name" id="mediaName">NO MEDIA SELECTED</div><div class="media-detail" id="mediaDetail">Choose a file to inspect its technical metadata.</div></div><span class="ready" id="readyBadge">WAITING</span></div><div class="wave-shell empty" id="waveShell"><canvas id="waveform" aria-label="Media waveform and selection timeline"></canvas><span id="waveEmpty">WAVEFORM / TIMELINE</span><span class="wave-hint" id="waveHint"></span></div><div class="selection"><label class="selection-toggle"><input type="checkbox" id="useSelection"> TRANSCRIBE SELECTION</label><label>START (SECONDS)<input type="number" id="startAt" min="0" step="0.1" value="0" disabled></label><label>END (SECONDS)<input type="number" id="endAt" min="0" step="0.1" value="0" disabled></label></div><audio class="player" id="player" aria-label="Selected media preview" controls preload="metadata"></audio></section>
+<aside class="panel settings"><div class="panel-title">COMPILE SETTINGS</div><div class="settings-body"><div class="field"><label for="mode">MODE</label><select id="mode"><option value="transcribe">Transcribe speech → text</option><option value="translate">Translate speech → English</option></select></div><div class="field"><label for="language">LANGUAGE</label><select id="language"><option value="auto">Detect automatically</option>__LANGUAGE_OPTIONS__</select></div><div class="field"><label for="format">FORMAT</label><select id="format"><option value="txt">TXT — readable text</option><option value="srt">SRT — subtitles</option><option value="vtt">VTT — web captions</option><option value="tsv">TSV — timing data</option><option value="json">JSON — structured data</option><option value="all">ALL — every format</option></select></div><div class="field"><label for="outDir">OUTPUT</label><div class="path-row"><input id="outDir" readonly placeholder="Beside source file"><button id="chooseFolder" aria-label="Choose output folder">…</button></div></div><label class="enforced"><input type="checkbox" checked disabled> LOCAL / PRIVATE — ENFORCED</label><button class="run" id="runButton">▶ COMPILE TRANSCRIPT</button><div class="error" id="error" role="alert"></div><details class="command" open><summary>COMMAND PREVIEW</summary><pre id="commandPreview">$ transcribe [choose media]</pre></details></div></aside>
+<section class="panel process" aria-live="polite"><div class="panel-title">PROCESS STREAM</div><div class="process-grid"><pre class="log" id="log">[ready] localhost transcription engine awaiting media...</pre><div class="telemetry"><div class="progress-head"><span id="jobState">IDLE</span><b id="progressLabel">0%</b></div><div class="progress-track"><div class="progress-bar" id="progressBar"></div></div><div class="metrics"><div class="metric"><b id="elapsed">00:00</b><span>ELAPSED</span></div><div class="metric"><b id="remaining">--:--</b><span>REMAINING</span></div><div class="metric"><b id="speed">—</b><span>SPEED</span></div></div><div class="job-actions"><button id="cancelButton" disabled>■ CANCEL</button><button class="reveal" id="revealButton">▣ REVEAL</button></div></div></div></section>
+</main><div class="footer">A LOCAL TRANSCRIPTION ENVIRONMENT FOR PEOPLE WHO LIKE TO TINKER. <button id="quitButton">[ QUIT LOCAL INTERFACE ]</button></div></div>
 <script>
-const token=__TOKEN__;let translating=false,pollTimer=null;
-const source=document.getElementById('source'),outDir=document.getElementById('outDir'),format=document.getElementById('format'),language=document.getElementById('language'),status=document.getElementById('status'),start=document.getElementById('start'),badge=document.getElementById('badge'),log=document.getElementById('log'),statusText=document.getElementById('statusText'),cancelEl=document.getElementById('cancel'),revealEl=document.getElementById('reveal');
-async function api(path,body={}){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Transcribe-Token':token},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Something went wrong.');return data}
-function setMode(value){translating=value;const transcribeMode=document.getElementById('transcribeMode'),translateMode=document.getElementById('translateMode'),englishOption=language.querySelector('option[value="en"]');transcribeMode.classList.toggle('active',!value);translateMode.classList.toggle('active',value);transcribeMode.setAttribute('aria-pressed',String(!value));translateMode.setAttribute('aria-pressed',String(value));englishOption.disabled=value;if(value&&language.value==='en')language.value='auto';if(value&&format.value==='txt')format.value='srt';document.getElementById('start').textContent=value?'Translate to English':'Start transcription'}
-async function pickFile(){try{const d=await api('choose-file');if(d.path){source.value=d.path;if(!outDir.value)outDir.placeholder='Beside '+d.parent}}catch(e){showError(e.message)}}
-async function pickFolder(){try{const d=await api('choose-folder');if(d.path)outDir.value=d.path}catch(e){showError(e.message)}}
-function showError(message){document.getElementById('error').textContent=message}
-async function startJob(){showError('');if(!source.value)return showError('Choose an audio or video file first.');try{await api('start',{source:source.value,out_dir:outDir.value,format:format.value,language:language.value,translate:translating});status.classList.add('show');start.disabled=true;poll()}catch(e){showError(e.message)}}
-async function poll(){try{const r=await fetch('/api/status',{headers:{'X-Transcribe-Token':token}}),d=await r.json();badge.textContent=d.state;log.textContent=d.log;log.scrollTop=log.scrollHeight;const done=['success','error','cancelled'].includes(d.state);statusText.textContent=d.state==='success'?'Finished successfully':d.state==='error'?'Could not finish':d.state==='cancelled'?'Cancelled':d.state==='cancelling'?'Cancelling…':'Working locally…';cancelEl.style.display=done?'none':'inline-block';revealEl.style.display=d.state==='success'?'inline-block':'none';start.disabled=!done;if(!done)pollTimer=setTimeout(poll,800)}catch(e){showError(e.message);start.disabled=false}}
-async function cancelJob(){try{await api('cancel')}catch(e){showError(e.message)}}async function reveal(){try{await api('reveal')}catch(e){showError(e.message)}}async function quitUi(){try{await api('shutdown');document.body.innerHTML='<main><div class="card"><h2>Transcribe closed</h2><p>You can close this tab.</p></div></main>'}catch(e){showError(e.message)}}
+const token=__TOKEN__;let files=[],current=null,peaks=[],dragging=false,dragStart=0,pollTimer=null;
+const $=id=>document.getElementById(id),fileList=$('fileList'),wave=$('waveform'),waveShell=$('waveShell'),player=$('player'),mode=$('mode'),language=$('language'),format=$('format'),outDir=$('outDir'),useSelection=$('useSelection'),startAt=$('startAt'),endAt=$('endAt'),runButton=$('runButton'),cancelButton=$('cancelButton'),revealButton=$('revealButton'),log=$('log');
+async function api(path,body={}){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Transcribe-Token':token},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Operation failed.');return data}
+function esc(value){return String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}
+function clock(value,short=false){value=Math.max(0,Math.round(Number(value)||0));const h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;return h||!short?[h,m,s].map(v=>String(v).padStart(2,'0')).join(':'):[m,s].map(v=>String(v).padStart(2,'0')).join(':')}
+function bytes(value){const units=['B','KB','MB','GB'];let size=Number(value)||0,index=0;while(size>=1024&&index<3){size/=1024;index++}return (index?size.toFixed(size>=100?0:1):size)+' '+units[index]}
+function metadata(file){const rate=file.sample_rate?Math.round(file.sample_rate/1000)+'kHz':'audio';const channels=file.channels===1?'mono':file.channels===2?'stereo':file.channels?file.channels+'ch':'—';return `${String(file.format).split(',')[0].toUpperCase()} · ${rate} · ${channels} · ${clock(file.duration)} · ${bytes(file.size)}`}
+function shellQuote(value){return `'${String(value).replace(/'/g,"'\\''")}'`}
+function renderFiles(){if(!files.length){fileList.innerHTML='<div class="library-empty">No media loaded.<br>Select one or several files to begin.</div>';return}fileList.innerHTML=files.map(file=>`<button class="file ${current&&current.id===file.id?'active':''}" data-id="${file.id}"><span class="file-name">${esc(file.name)}</span><span class="file-meta">${esc(clock(file.duration,true))} · ${esc(bytes(file.size))}</span></button>`).join('');fileList.querySelectorAll('.file').forEach(button=>button.onclick=()=>selectFile(button.dataset.id))}
+async function addMedia(){showError('');$('addMedia').disabled=true;$('addMedia').innerHTML='<strong>⌁</strong>INSPECTING MEDIA…';try{const data=await api('choose-files');for(const file of data.files){if(!files.some(item=>item.id===file.id))files.push(file)}renderFiles();if(data.files.length)await selectFile(data.files[0].id)}catch(error){showError(error.message)}finally{$('addMedia').disabled=false;$('addMedia').innerHTML='<strong>＋</strong>ADD AUDIO OR VIDEO'}}
+async function selectFile(id){current=files.find(file=>file.id===id);if(!current)return;renderFiles();$('mediaName').textContent=current.name;$('mediaDetail').textContent=metadata(current);$('readyBadge').textContent='READY';outDir.placeholder='Beside '+current.name;startAt.value='0';endAt.value=String(current.duration.toFixed(1));startAt.max=endAt.max=String(current.duration);useSelection.checked=false;toggleSelection();player.src=`/media/${encodeURIComponent(current.id)}?token=${encodeURIComponent(token)}`;waveShell.classList.remove('empty');$('waveEmpty').style.display='none';$('waveHint').textContent='CLICK TO SEEK · DRAG TO SELECT';peaks=[];drawWave();updateCommand();try{const data=await api('waveform',{id:current.id});peaks=data.peaks;drawWave()}catch(error){showError(error.message)}}
+function drawWave(){const rect=wave.getBoundingClientRect(),ratio=window.devicePixelRatio||1;wave.width=Math.max(1,Math.round(rect.width*ratio));wave.height=Math.max(1,Math.round(rect.height*ratio));const ctx=wave.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,rect.width,rect.height);const style=getComputedStyle(document.documentElement),amber=style.getPropertyValue('--amber'),muted=style.getPropertyValue('--muted');if(!peaks.length){ctx.fillStyle=muted;ctx.font='11px ui-monospace';ctx.fillText(current?'ANALYZING WAVEFORM…':'',16,28);return}if(useSelection.checked){const left=Number(startAt.value)/current.duration*rect.width,right=Number(endAt.value)/current.duration*rect.width;ctx.fillStyle=style.getPropertyValue('--amber-soft');ctx.fillRect(left,0,Math.max(2,right-left),rect.height)}ctx.strokeStyle=amber;ctx.lineWidth=Math.max(1,rect.width/peaks.length*.62);const middle=rect.height/2,step=rect.width/peaks.length;ctx.beginPath();peaks.forEach((peak,index)=>{const height=Math.max(1,peak*(rect.height*.82));const x=index*step;ctx.moveTo(x,middle-height/2);ctx.lineTo(x,middle+height/2)});ctx.stroke();if(current&&player.currentTime){const x=player.currentTime/current.duration*rect.width;ctx.strokeStyle=style.getPropertyValue('--lime');ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,rect.height);ctx.stroke()}}
+function pointTime(event){const rect=wave.getBoundingClientRect();return Math.max(0,Math.min(current.duration,(event.clientX-rect.left)/rect.width*current.duration))}
+function toggleSelection(){startAt.disabled=endAt.disabled=!useSelection.checked;updateCommand();drawWave()}
+function updateCommand(){if(!current){$('commandPreview').textContent='$ transcribe [choose media]';return}const parts=['transcribe',shellQuote(current.path)];if(mode.value==='translate')parts.push('--translate-to en');parts.push(language.value==='auto'?'--auto-language':'--language '+language.value,'--format '+format.value);if(outDir.value)parts.push('--out-dir '+shellQuote(outDir.value));if(useSelection.checked)parts.push('--start-at '+Number(startAt.value).toFixed(1),'--end-at '+Number(endAt.value).toFixed(1));$('commandPreview').textContent='$ '+parts.join(' \\\n  ')}
+function updateMode(){const english=language.querySelector('option[value="en"]');english.disabled=mode.value==='translate';if(english.disabled&&language.value==='en')language.value='auto';if(mode.value==='translate'&&format.value==='txt')format.value='srt';runButton.textContent=mode.value==='translate'?'▶ COMPILE ENGLISH TRANSLATION':'▶ COMPILE TRANSCRIPT';updateCommand()}
+function showError(message){$('error').textContent=message}
+async function pickFolder(){try{const data=await api('choose-folder');if(data.path)outDir.value=data.path;updateCommand()}catch(error){showError(error.message)}}
+async function startJob(){showError('');if(!current)return showError('Add and select a media file first.');try{await api('start',{id:current.id,out_dir:outDir.value,format:format.value,language:language.value,translate:mode.value==='translate',duration:current.duration,start_at:useSelection.checked?Number(startAt.value):null,end_at:useSelection.checked?Number(endAt.value):null});runButton.disabled=true;cancelButton.disabled=false;revealButton.style.display='none';poll()}catch(error){showError(error.message)}}
+async function poll(){try{const response=await fetch('/api/status',{headers:{'X-Transcribe-Token':token}}),data=await response.json();log.textContent=data.log||'[working]';log.scrollTop=log.scrollHeight;$('jobState').textContent=data.state.toUpperCase();$('progressLabel').textContent=data.progress+'%';$('progressBar').style.width=data.progress+'%';$('elapsed').textContent=clock(data.elapsed,true);$('remaining').textContent=data.remaining?clock(data.remaining,true):'--:--';$('speed').textContent=data.speed?data.speed.toFixed(2)+'×':'—';const done=['success','error','cancelled'].includes(data.state);runButton.disabled=!done;cancelButton.disabled=done;revealButton.style.display=data.state==='success'?'block':'none';if(!done)pollTimer=setTimeout(poll,700)}catch(error){showError(error.message);runButton.disabled=false}}
+async function cancelJob(){try{await api('cancel')}catch(error){showError(error.message)}}async function reveal(){try{await api('reveal')}catch(error){showError(error.message)}}async function quitUi(){try{await api('shutdown');document.body.innerHTML='<div style="padding:48px;font-family:ui-monospace;background:#0d0d0c;color:#f1f0e8;min-height:100vh"><h1>TRANSCRIBE LAB / CLOSED</h1><p>You can close this tab.</p></div>'}catch(error){showError(error.message)}}
+$('addMedia').onclick=addMedia;$('chooseFolder').onclick=pickFolder;runButton.onclick=startJob;cancelButton.onclick=cancelJob;revealButton.onclick=reveal;$('quitButton').onclick=quitUi;mode.onchange=updateMode;language.onchange=format.onchange=updateCommand;outDir.onchange=updateCommand;useSelection.onchange=toggleSelection;startAt.oninput=endAt.oninput=()=>{if(Number(endAt.value)<=Number(startAt.value))endAt.value=String(Math.min(current.duration,Number(startAt.value)+1));updateCommand();drawWave()};wave.onpointerdown=event=>{if(!current)return;dragging=useSelection.checked;dragStart=pointTime(event);if(dragging){startAt.value=endAt.value=String(dragStart.toFixed(1));wave.setPointerCapture(event.pointerId)}else{player.currentTime=dragStart;drawWave()}};wave.onpointermove=event=>{if(!dragging)return;const now=pointTime(event);startAt.value=String(Math.min(dragStart,now).toFixed(1));endAt.value=String(Math.max(dragStart,now).toFixed(1));updateCommand();drawWave()};wave.onpointerup=()=>{dragging=false;if(Number(endAt.value)-Number(startAt.value)<.5)endAt.value=String(Math.min(current.duration,Number(startAt.value)+1).toFixed(1));updateCommand();drawWave()};player.ontimeupdate=drawWave;window.onresize=drawWave;$('themeButton').onclick=()=>{const root=document.documentElement;root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';$('themeButton').textContent=root.dataset.theme==='dark'?'☼':'☾';drawWave()};updateMode();
 </script></body></html>'''
 
 
@@ -418,6 +618,7 @@ def launch_ui(open_browser: bool = True) -> int:
     """Serve the dependency-free local interface until the user quits it."""
     token = secrets.token_urlsafe(24)
     job = LocalJob()
+    media_registry: dict[str, Path] = {}
     featured_options = "".join(
         f'<option value="{code}">{SUPPORTED_LANGUAGES[code]}</option>'
         for code in FEATURED_LANGUAGE_CODES
@@ -461,8 +662,69 @@ def launch_ui(open_browser: bool = True) -> int:
             except (ValueError, json.JSONDecodeError):
                 return {}
 
+        def _serve_media(self, media_id: str) -> None:
+            source = media_registry.get(media_id)
+            if source is None or not source.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            total = source.stat().st_size
+            start, end = 0, total - 1
+            range_header = self.headers.get("Range", "")
+            if range_header:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+                if not match:
+                    self.send_error(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    return
+                if not match.group(1) and not match.group(2):
+                    self.send_error(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    return
+                if not match.group(1):
+                    suffix_length = min(total, int(match.group(2)))
+                    start = total - suffix_length
+                else:
+                    start = int(match.group(1))
+                if match.group(1) and match.group(2):
+                    end = min(end, int(match.group(2)))
+                if start > end or start >= total:
+                    self.send_error(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    return
+            length = end - start + 1
+            self.send_response(
+                HTTPStatus.PARTIAL_CONTENT if range_header else HTTPStatus.OK
+            )
+            self.send_header(
+                "Content-Type",
+                mimetypes.guess_type(source.name)[0] or "application/octet-stream",
+            )
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            if range_header:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+            self.end_headers()
+            try:
+                with source.open("rb") as media:
+                    media.seek(start)
+                    remaining = length
+                    while remaining:
+                        chunk = media.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
         def do_GET(self) -> None:
-            if self.path == "/":
+            parsed = urlparse(self.path)
+            if parsed.path.startswith("/media/"):
+                query_token = parse_qs(parsed.query).get("token", [""])[0]
+                if query_token != token:
+                    self.send_error(HTTPStatus.FORBIDDEN)
+                    return
+                self._serve_media(parsed.path.removeprefix("/media/"))
+                return
+            if parsed.path == "/":
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(page)))
@@ -477,7 +739,7 @@ def launch_ui(open_browser: bool = True) -> int:
                 self.end_headers()
                 self.wfile.write(page)
                 return
-            if self.path == "/api/status" and self._authorized():
+            if parsed.path == "/api/status" and self._authorized():
                 self._json(job.snapshot())
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -487,36 +749,86 @@ def launch_ui(open_browser: bool = True) -> int:
                 self._json({"error": "Unauthorized"}, HTTPStatus.FORBIDDEN)
                 return
             body = self._body()
-            if self.path == "/api/choose-file":
-                selected = choose_with_macos("Choose an audio or video file")
-                self._json(
-                    {
-                        "path": str(selected) if selected else "",
-                        "parent": str(selected.parent) if selected else "",
-                    }
-                )
+            if self.path == "/api/choose-files":
+                selected = choose_files_with_macos("Choose audio or video files")
+                inspected = []
+                try:
+                    for source in selected:
+                        source = source.expanduser().resolve()
+                        if not source.is_file():
+                            continue
+                        existing_id = next(
+                            (
+                                media_id
+                                for media_id, registered in media_registry.items()
+                                if registered == source
+                            ),
+                            None,
+                        )
+                        media_id = existing_id or secrets.token_urlsafe(9)
+                        media_registry[media_id] = source
+                        details = inspect_media(source)
+                        details["id"] = media_id
+                        inspected.append(details)
+                except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+                    self._json({"error": f"Could not inspect media: {error}"}, 400)
+                    return
+                self._json({"files": inspected})
                 return
             if self.path == "/api/choose-folder":
                 selected = choose_with_macos("Choose where to save the transcript", True)
                 self._json({"path": str(selected) if selected else ""})
                 return
             if self.path == "/api/start":
-                source = Path(str(body.get("source", ""))).expanduser().resolve()
+                source = media_registry.get(str(body.get("id", "")))
+                if source is None:
+                    self._json({"error": "Select a registered media file."}, 400)
+                    return
                 out_value = str(body.get("out_dir", "")).strip()
                 out_dir = (
                     Path(out_value).expanduser().resolve() if out_value else source.parent
                 )
+                try:
+                    duration = float(body.get("duration") or 0)
+                    start_at = (
+                        float(body["start_at"])
+                        if body.get("start_at") is not None
+                        else None
+                    )
+                    end_at = (
+                        float(body["end_at"])
+                        if body.get("end_at") is not None
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    self._json({"error": "Choose a valid media range."}, 400)
+                    return
                 started, message = job.start(
                     source,
                     out_dir,
                     str(body.get("format", "txt")),
                     str(body.get("language", "auto")),
                     bool(body.get("translate", False)),
+                    duration,
+                    start_at,
+                    end_at,
                 )
                 self._json(
                     {"ok": started, "message": message},
                     HTTPStatus.OK if started else HTTPStatus.BAD_REQUEST,
                 )
+                return
+            if self.path == "/api/waveform":
+                source = media_registry.get(str(body.get("id", "")))
+                if source is None:
+                    self._json({"error": "Select a registered media file."}, 400)
+                    return
+                try:
+                    peaks = waveform_peaks(source)
+                except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+                    self._json({"error": f"Could not create waveform: {error}"}, 400)
+                    return
+                self._json({"peaks": peaks})
                 return
             if self.path == "/api/cancel":
                 self._json({"cancelled": job.cancel()})
@@ -540,7 +852,7 @@ def launch_ui(open_browser: bool = True) -> int:
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_port}/"
-    print(f"Opening Transcribe: {url}")
+    print(f"Opening Transcribe Lab: {url}")
     print("Keep this Terminal window open while using the interface.")
     print("Press Control-C here if you need to close it.")
     if open_browser:
@@ -605,7 +917,7 @@ def guided_terminal() -> int:
 
 def launch_menu() -> int:
     print("\nWelcome to Transcribe\n")
-    print("1) Open the simple interface")
+    print("1) Open Transcribe Lab")
     print("2) Continue with guided Terminal mode")
     print("3) Show command help")
     try:
@@ -662,9 +974,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.start_at is not None or args.end_at is not None:
+        if (
+            args.start_at is None
+            or args.end_at is None
+            or args.start_at < 0
+            or args.end_at <= args.start_at
+        ):
+            print(
+                "--start-at and --end-at must define a valid increasing range.",
+                file=sys.stderr,
+            )
+            return 2
 
     output_name = output_name_for(
-        source, translated_to_english=bool(args.translate_to)
+        source,
+        translated_to_english=bool(args.translate_to),
+        start_at=args.start_at,
+        end_at=args.end_at,
     )
 
     command = [
@@ -685,6 +1012,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ]
     if not args.auto_language:
         command.extend(["--language", args.language])
+    if args.start_at is not None and args.end_at is not None:
+        command.extend(
+            ["--clip-timestamps", f"{args.start_at:g},{args.end_at:g}"]
+        )
 
     action = (
         "Transcribing and translating to English"

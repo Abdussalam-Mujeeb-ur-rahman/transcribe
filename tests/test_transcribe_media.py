@@ -37,6 +37,12 @@ class TranscribeMediaTests(unittest.TestCase):
         name = transcribe_media.output_name_for(Path("voice.note.09.38.19.opus"))
         self.assertEqual(name, "voice-note-09-38-19_transcript")
 
+    def test_selected_range_is_included_in_output_name(self) -> None:
+        name = transcribe_media.output_name_for(
+            Path("interview.wav"), start_at=3.6, end_at=12.2
+        )
+        self.assertEqual(name, "interview_clip-3p6-to-12p2_transcript")
+
     def test_help_uses_short_command_name(self) -> None:
         result = subprocess.run(
             [sys.executable, str(PROJECT_ROOT / "transcribe_media.py"), "--help"],
@@ -81,6 +87,50 @@ class TranscribeMediaTests(unittest.TestCase):
             result = transcribe_media.choose_with_macos("Choose a file")
 
         self.assertEqual(result, Path("/tmp/movie.mp4"))
+
+    def test_native_multi_file_picker_returns_every_selected_path(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["osascript"],
+            returncode=0,
+            stdout="/tmp/first.mp4\n/tmp/second.opus\n",
+        )
+        with mock.patch("transcribe_media.subprocess.run", return_value=completed):
+            result = transcribe_media.choose_files_with_macos("Choose files")
+
+        self.assertEqual(result, [Path("/tmp/first.mp4"), Path("/tmp/second.opus")])
+
+    def test_media_inspection_uses_real_probe_values(self) -> None:
+        payload = {
+            "format": {"duration": "24.17", "size": "352000000", "format_name": "wav"},
+            "streams": [
+                {"codec_type": "video"},
+                {"codec_type": "audio", "sample_rate": "48000", "channels": 2},
+            ],
+        }
+        completed = subprocess.CompletedProcess(
+            args=["ffprobe"], returncode=0, stdout=transcribe_media.json.dumps(payload)
+        )
+        with mock.patch("transcribe_media.find_executable", return_value="ffprobe"), mock.patch(
+            "transcribe_media.subprocess.run", return_value=completed
+        ):
+            details = transcribe_media.inspect_media(Path("interview.wav"))
+
+        self.assertEqual(details["duration"], 24.17)
+        self.assertEqual(details["sample_rate"], 48000)
+        self.assertEqual(details["channels"], 2)
+        self.assertEqual(details["size"], 352000000)
+
+    def test_waveform_is_scaled_to_the_media_peak(self) -> None:
+        samples = transcribe_media.array.array("h", [0, 100, -200, 400])
+        completed = subprocess.CompletedProcess(
+            args=["ffmpeg"], returncode=0, stdout=samples.tobytes()
+        )
+        with mock.patch("transcribe_media.find_executable", return_value="ffmpeg"), mock.patch(
+            "transcribe_media.subprocess.run", return_value=completed
+        ):
+            peaks = transcribe_media.waveform_peaks(Path("sample.wav"), bin_count=2)
+
+        self.assertEqual(peaks, [0.25, 1.0])
 
     def test_interface_cancel_stops_the_complete_process_group(self) -> None:
         job = transcribe_media.LocalJob()
@@ -137,6 +187,49 @@ class TranscribeMediaTests(unittest.TestCase):
                 command[command.index("--output-name") + 1],
                 "movie_english_translation",
             )
+
+    def test_selected_range_is_forwarded_to_whisper(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "meeting.wav"
+            source.touch()
+            executable = root / "mlx_whisper"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+
+            with mock.patch("transcribe_media.subprocess.run") as run:
+                result = transcribe_media.main(
+                    [
+                        str(source),
+                        "--start-at",
+                        "3.5",
+                        "--end-at",
+                        "8",
+                        "--whisper-bin",
+                        str(executable),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--clip-timestamps") + 1], "3.5,8"
+        )
+        self.assertEqual(
+            command[command.index("--output-name") + 1],
+            "meeting_clip-3p5-to-8_transcript",
+        )
+
+    def test_invalid_selected_range_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "meeting.wav"
+            source.touch()
+            with mock.patch("transcribe_media.find_executable", return_value="mlx"):
+                result = transcribe_media.main(
+                    [str(source), "--start-at", "8", "--end-at", "3"]
+                )
+
+        self.assertEqual(result, 2)
 
     def test_translation_rejects_english_as_the_source(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
