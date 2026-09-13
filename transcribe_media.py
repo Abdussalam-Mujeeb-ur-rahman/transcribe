@@ -23,9 +23,54 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 DEFAULT_MODEL = "mlx-community/whisper-small-mlx"
 OUTPUT_FORMATS = ("txt", "srt", "vtt", "tsv", "json", "all")
+SUPPORTED_LANGUAGES = {
+    "af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese",
+    "az": "Azerbaijani", "ba": "Bashkir", "be": "Belarusian", "bg": "Bulgarian",
+    "bn": "Bengali", "bo": "Tibetan", "br": "Breton", "bs": "Bosnian",
+    "ca": "Catalan", "cs": "Czech", "cy": "Welsh", "da": "Danish",
+    "de": "German", "el": "Greek", "en": "English", "es": "Spanish",
+    "et": "Estonian", "eu": "Basque", "fa": "Persian", "fi": "Finnish",
+    "fo": "Faroese", "fr": "French", "gl": "Galician", "gu": "Gujarati",
+    "ha": "Hausa", "haw": "Hawaiian", "he": "Hebrew", "hi": "Hindi",
+    "hr": "Croatian", "ht": "Haitian Creole", "hu": "Hungarian",
+    "hy": "Armenian", "id": "Indonesian", "is": "Icelandic", "it": "Italian",
+    "ja": "Japanese", "jw": "Javanese", "ka": "Georgian", "kk": "Kazakh",
+    "km": "Khmer", "kn": "Kannada", "ko": "Korean", "la": "Latin",
+    "lb": "Luxembourgish", "ln": "Lingala", "lo": "Lao", "lt": "Lithuanian",
+    "lv": "Latvian", "mg": "Malagasy", "mi": "Maori", "mk": "Macedonian",
+    "ml": "Malayalam", "mn": "Mongolian", "mr": "Marathi", "ms": "Malay",
+    "mt": "Maltese", "my": "Myanmar", "ne": "Nepali", "nl": "Dutch",
+    "nn": "Nynorsk", "no": "Norwegian", "oc": "Occitan", "pa": "Punjabi",
+    "pl": "Polish", "ps": "Pashto", "pt": "Portuguese", "ro": "Romanian",
+    "ru": "Russian", "sa": "Sanskrit", "sd": "Sindhi", "si": "Sinhala",
+    "sk": "Slovak", "sl": "Slovenian", "sn": "Shona", "so": "Somali",
+    "sq": "Albanian", "sr": "Serbian", "su": "Sundanese", "sv": "Swedish",
+    "sw": "Swahili", "ta": "Tamil", "te": "Telugu", "tg": "Tajik",
+    "th": "Thai", "tk": "Turkmen", "tl": "Tagalog", "tr": "Turkish",
+    "tt": "Tatar", "uk": "Ukrainian", "ur": "Urdu", "uz": "Uzbek",
+    "vi": "Vietnamese", "yi": "Yiddish", "yo": "Yoruba", "yue": "Cantonese",
+    "zh": "Chinese",
+}
+FEATURED_LANGUAGE_CODES = (
+    "en",
+    "zh",
+    "es",
+    "ko",
+    "pt",
+    "fr",
+    "ar",
+    "hi",
+    "ja",
+    "de",
+    "ru",
+    "tr",
+    "yo",
+    "ha",
+    "sw",
+)
 RAW_SCRIPT_URL = (
     "https://raw.githubusercontent.com/Abdussalam-Mujeeb-ur-rahman/"
     "transcribe/main/transcribe_media.py"
@@ -51,7 +96,7 @@ def install_dir() -> Path:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="transcribe",
-        description="Create a local transcript or Turkish-to-English translation.",
+        description="Create a local transcript or translate supported speech to English.",
     )
     parser.add_argument(
         "input", nargs="?", type=Path, help="Path to an audio or video file"
@@ -80,7 +125,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--translate-to",
         choices=("en",),
-        help="Translate Turkish speech into English (use: --language tr)",
+        help="Translate supported non-English speech into English",
     )
     parser.add_argument(
         "--update",
@@ -250,10 +295,10 @@ class LocalJob:
             return False, "Choose a valid audio or video file."
         if output_format not in OUTPUT_FORMATS:
             return False, "Choose a valid output format."
-        if language not in ("auto", "en", "tr"):
+        if language != "auto" and language not in SUPPORTED_LANGUAGES:
             return False, "Choose a valid language."
-        if translate and language != "tr":
-            return False, "Turkish-to-English translation requires Turkish input."
+        if translate and language == "en":
+            return False, "Choose a non-English source language or automatic detection."
 
         out_dir.mkdir(parents=True, exist_ok=True)
         command = [
@@ -348,8 +393,8 @@ input,select,button{font:inherit;border-radius:10px;border:1px solid var(--line)
 <div class="brand"><div class="icon">⌁</div><div><h1>Transcribe</h1><p>Private transcription on your Apple silicon Mac</p></div></div>
 <div class="card">
 <label for="source">Audio or video</label><div class="row"><input id="source" readonly placeholder="Choose a recording or movie"><button onclick="pickFile()">Choose file</button></div>
-<label>What should I do?</label><div class="mode"><button id="transcribeMode" class="active" aria-pressed="true" onclick="setMode(false)">Transcribe</button><button id="translateMode" aria-pressed="false" onclick="setMode(true)">Turkish → English</button></div>
-<div class="grid"><div><label for="language">Spoken language</label><select id="language"><option value="auto">Detect automatically</option><option value="en">English</option><option value="tr">Turkish</option></select></div><div><label for="format">Output format</label><select id="format"><option value="txt">TXT — readable text</option><option value="srt">SRT — video subtitles</option><option value="vtt">VTT — web subtitles</option><option value="tsv">TSV — timing data</option><option value="json">JSON — structured data</option><option value="all">All formats</option></select></div></div>
+<label>What should I do?</label><div class="mode"><button id="transcribeMode" class="active" aria-pressed="true" onclick="setMode(false)">Transcribe</button><button id="translateMode" aria-pressed="false" onclick="setMode(true)">Translate to English</button></div>
+<div class="grid"><div><label for="language">Spoken language</label><select id="language"><option value="auto">Detect automatically</option>__LANGUAGE_OPTIONS__</select></div><div><label for="format">Output format</label><select id="format"><option value="txt">TXT — readable text</option><option value="srt">SRT — video subtitles</option><option value="vtt">VTT — web subtitles</option><option value="tsv">TSV — timing data</option><option value="json">JSON — structured data</option><option value="all">All formats</option></select></div></div>
 <label for="outDir">Save location</label><div class="row"><input id="outDir" readonly placeholder="Beside the original file"><button onclick="pickFolder()">Choose folder</button></div>
 <button class="primary" id="start" onclick="startJob()">Start transcription</button><div id="error" class="error" role="alert"></div>
 <div id="status" class="status" aria-live="polite"><div class="status-line"><strong id="statusText">Preparing…</strong><span id="badge" class="badge">running</span></div><pre id="log"></pre><div class="actions"><button id="cancel" onclick="cancelJob()">Cancel</button><button id="reveal" onclick="reveal()" style="display:none">Show in Finder</button></div></div>
@@ -359,7 +404,7 @@ input,select,button{font:inherit;border-radius:10px;border:1px solid var(--line)
 const token=__TOKEN__;let translating=false,pollTimer=null;
 const source=document.getElementById('source'),outDir=document.getElementById('outDir'),format=document.getElementById('format'),language=document.getElementById('language'),status=document.getElementById('status'),start=document.getElementById('start'),badge=document.getElementById('badge'),log=document.getElementById('log'),statusText=document.getElementById('statusText'),cancelEl=document.getElementById('cancel'),revealEl=document.getElementById('reveal');
 async function api(path,body={}){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Transcribe-Token':token},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Something went wrong.');return data}
-function setMode(value){translating=value;const transcribeMode=document.getElementById('transcribeMode'),translateMode=document.getElementById('translateMode');transcribeMode.classList.toggle('active',!value);translateMode.classList.toggle('active',value);transcribeMode.setAttribute('aria-pressed',String(!value));translateMode.setAttribute('aria-pressed',String(value));const lang=document.getElementById('language'),format=document.getElementById('format');if(value){lang.value='tr';lang.disabled=true;if(format.value==='txt')format.value='srt'}else{lang.disabled=false}document.getElementById('start').textContent=value?'Translate to English':'Start transcription'}
+function setMode(value){translating=value;const transcribeMode=document.getElementById('transcribeMode'),translateMode=document.getElementById('translateMode'),englishOption=language.querySelector('option[value="en"]');transcribeMode.classList.toggle('active',!value);translateMode.classList.toggle('active',value);transcribeMode.setAttribute('aria-pressed',String(!value));translateMode.setAttribute('aria-pressed',String(value));englishOption.disabled=value;if(value&&language.value==='en')language.value='auto';if(value&&format.value==='txt')format.value='srt';document.getElementById('start').textContent=value?'Translate to English':'Start transcription'}
 async function pickFile(){try{const d=await api('choose-file');if(d.path){source.value=d.path;if(!outDir.value)outDir.placeholder='Beside '+d.parent}}catch(e){showError(e.message)}}
 async function pickFolder(){try{const d=await api('choose-folder');if(d.path)outDir.value=d.path}catch(e){showError(e.message)}}
 function showError(message){document.getElementById('error').textContent=message}
@@ -373,7 +418,24 @@ def launch_ui(open_browser: bool = True) -> int:
     """Serve the dependency-free local interface until the user quits it."""
     token = secrets.token_urlsafe(24)
     job = LocalJob()
-    page = UI_TEMPLATE.replace("__TOKEN__", json.dumps(token)).encode("utf-8")
+    featured_options = "".join(
+        f'<option value="{code}">{SUPPORTED_LANGUAGES[code]}</option>'
+        for code in FEATURED_LANGUAGE_CODES
+    )
+    other_options = "".join(
+        f'<option value="{code}">{name}</option>'
+        for code, name in sorted(SUPPORTED_LANGUAGES.items(), key=lambda item: item[1])
+        if code not in FEATURED_LANGUAGE_CODES
+    )
+    language_options = (
+        f'<optgroup label="Popular languages">{featured_options}</optgroup>'
+        f'<optgroup label="All other supported languages">{other_options}</optgroup>'
+    )
+    page = (
+        UI_TEMPLATE.replace("__TOKEN__", json.dumps(token))
+        .replace("__LANGUAGE_OPTIONS__", language_options)
+        .encode("utf-8")
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
@@ -511,7 +573,7 @@ def guided_terminal() -> int:
     if source is None:
         print("No file selected.", file=sys.stderr)
         return 2
-    action = input("1) Transcribe  2) Turkish → English [1]: ").strip() or "1"
+    action = input("1) Transcribe  2) Translate to English [1]: ").strip() or "1"
     translate = action == "2"
     if action not in ("1", "2"):
         print("Please choose 1 or 2.", file=sys.stderr)
@@ -524,7 +586,11 @@ def guided_terminal() -> int:
         return 2
     arguments = [str(source), "--format", output_format]
     if translate:
-        arguments.extend(["--language", "tr", "--translate-to", "en"])
+        language = input("Source language code, or auto [auto]: ").strip() or "auto"
+        arguments.extend(
+            ["--auto-language"] if language == "auto" else ["--language", language]
+        )
+        arguments.extend(["--translate-to", "en"])
     else:
         language = input("Spoken language code, or auto [auto]: ").strip() or "auto"
         arguments.extend(
@@ -590,15 +656,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     out_dir = (args.out_dir or source.parent).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    if args.translate_to and args.auto_language:
+    if args.translate_to and not args.auto_language and args.language == "en":
         print(
-            "For Turkish translation, use --language tr instead of --auto-language.",
-            file=sys.stderr,
-        )
-        return 2
-    if args.translate_to and args.language != "tr":
-        print(
-            "Turkish-to-English translation requires --language tr.",
+            "Choose a non-English --language or use --auto-language for translation.",
             file=sys.stderr,
         )
         return 2

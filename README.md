@@ -4,8 +4,8 @@ Transcribe audio and video locally on an Apple Silicon Mac with
 [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
 The default result is a readable TXT transcript saved beside the source.
 Timestamped subtitle output is available as SRT or VTT.
-Turkish recordings can also be translated directly into English TXT or
-English subtitles without installing another translation service.
+Supported non-English recordings can also be translated directly into English
+TXT or English subtitles without installing another translation service.
 
 The tool is useful for voice notes, meetings, interviews, and screen
 recordings. It supports OPUS, OGG, M4A, MP3, WAV, MP4, and MOV input through
@@ -53,10 +53,10 @@ Welcome to Transcribe
 ```
 
 The simple interface opens locally in your default browser. Choose an audio or
-video file with the native macOS picker, select transcription or Turkish →
-English translation, choose the output format and folder, and follow progress
-on the page. The browser does not upload or copy the recording; the existing
-command processes its path directly on your Mac.
+video file with the native macOS picker, select transcription or translation
+to English, choose the spoken language, output format and folder, and follow
+progress on the page. The browser does not upload or copy the recording; the
+existing command processes its path directly on your Mac.
 
 Open either experience directly with:
 
@@ -105,11 +105,11 @@ TXT result:
 
 ## Privacy
 
-Transcription and Turkish-to-English translation run on your Mac. Recordings
-are not sent to a hosted transcription API by this project. The selected model is downloaded from
-Hugging Face on first use and cached locally, so the first run can take longer
-and requires internet access. Later transcription can run from the local model
-cache.
+Transcription and translation to English run on your Mac. Recordings
+are not sent to a hosted transcription API by this project. The selected model
+is downloaded from Hugging Face on first use and cached locally, so the first
+run can take longer and requires internet access. Later transcription can run
+from the local model cache.
 
 ## Requirements
 
@@ -214,14 +214,18 @@ transcribe "/path/to/recording.mov" --auto-language
 
 If both options are supplied, `--auto-language` takes precedence.
 
-## Translate Turkish to English
+## Translate speech to English
 
-Use `--language tr --translate-to en`. For a movie, choose SRT to keep subtitle
-timestamps:
+Whisper can translate supported non-English speech into English. The interface
+includes Chinese, Spanish, Korean, Portuguese, French, Arabic, Hindi, Japanese,
+German, Russian, Turkish, Yoruba, Hausa, Swahili, and many more languages.
+
+Set the source language and add `--translate-to en`. For a movie, choose SRT to
+keep subtitle timestamps:
 
 ```bash
-transcribe "/path/to/turkish-movie.mp4" \
-  --language tr \
+transcribe "/path/to/spanish-movie.mp4" \
+  --language es \
   --translate-to en \
   --format srt
 ```
@@ -229,21 +233,37 @@ transcribe "/path/to/turkish-movie.mp4" \
 The English subtitle is saved beside the movie:
 
 ```text
-turkish-movie.mp4
-turkish-movie_english_translation.srt
+spanish-movie.mp4
+spanish-movie_english_translation.srt
 ```
 
-For an English plain-text translation instead:
+The same command works with other supported language codes:
 
 ```bash
-transcribe "/path/to/turkish-audio.m4a" \
-  --language tr \
+transcribe "/path/to/chinese-audio.m4a" --language zh --translate-to en --format txt
+transcribe "/path/to/korean-video.mov" --language ko --translate-to en --format srt
+transcribe "/path/to/portuguese-audio.mp3" --language pt --translate-to en --format txt
+transcribe "/path/to/turkish-movie.mp4" --language tr --translate-to en --format srt
+```
+
+Let Whisper detect the source language when you do not know it:
+
+```bash
+transcribe "/path/to/recording.m4a" --auto-language --translate-to en --format txt
+```
+
+For an English plain-text translation of French speech:
+
+```bash
+transcribe "/path/to/french-audio.m4a" \
+  --language fr \
   --translate-to en \
   --format txt
 ```
 
-This is speech translation, not dubbed audio: the result is English text or
-English subtitle files. The original recording is never modified. Music,
+Translation is one-way: supported speech becomes English text or English
+subtitles. It does not translate English speech into other languages or create
+dubbed audio. The original recording is never modified. Music,
 background noise, overlapping dialogue, and unclear speech can reduce subtitle
 accuracy, so review important results against the movie.
 
@@ -289,7 +309,7 @@ options:
   --format FORMAT       txt, srt, vtt, tsv, json, or all; defaults to txt
   --language LANGUAGE   Spoken language code; defaults to en
   --auto-language       Let Whisper detect the spoken language
-  --translate-to en     Translate Turkish speech into English
+  --translate-to en     Translate supported non-English speech into English
   --update              Update the command without reinstalling dependencies
   --ui                  Open the simple local interface in your browser
   --guided              Start an interactive guided Terminal session

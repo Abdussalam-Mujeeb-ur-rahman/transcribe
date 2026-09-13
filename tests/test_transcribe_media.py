@@ -62,6 +62,11 @@ class TranscribeMediaTests(unittest.TestCase):
         self.assertTrue(guided_args.guided)
         self.assertIsNone(ui_args.input)
 
+    def test_interface_features_major_and_african_languages(self) -> None:
+        expected = {"zh", "es", "ko", "pt", "fr", "ar", "hi", "yo", "ha", "sw"}
+        self.assertTrue(expected.issubset(transcribe_media.SUPPORTED_LANGUAGES))
+        self.assertTrue(expected.issubset(transcribe_media.FEATURED_LANGUAGE_CODES))
+
     def test_all_formats_reveals_the_text_result(self) -> None:
         result = transcribe_media.expected_output_path(
             Path("voice.opus"), Path("/tmp/results"), "all", False
@@ -100,7 +105,7 @@ class TranscribeMediaTests(unittest.TestCase):
         self.assertEqual(result, 17)
         guided.assert_called_once_with()
 
-    def test_turkish_to_english_uses_whisper_translate_task(self) -> None:
+    def test_supported_language_to_english_uses_whisper_translate_task(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / "movie.mp4"
@@ -114,7 +119,7 @@ class TranscribeMediaTests(unittest.TestCase):
                     [
                         str(source),
                         "--language",
-                        "tr",
+                        "fr",
                         "--translate-to",
                         "en",
                         "--format",
@@ -127,13 +132,13 @@ class TranscribeMediaTests(unittest.TestCase):
             self.assertEqual(result, 0)
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("--task") + 1], "translate")
-            self.assertEqual(command[command.index("--language") + 1], "tr")
+            self.assertEqual(command[command.index("--language") + 1], "fr")
             self.assertEqual(
                 command[command.index("--output-name") + 1],
                 "movie_english_translation",
             )
 
-    def test_translation_requires_turkish_source(self) -> None:
+    def test_translation_rejects_english_as_the_source(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "movie.mp4"
             source.touch()
@@ -142,6 +147,32 @@ class TranscribeMediaTests(unittest.TestCase):
                     [str(source), "--translate-to", "en"]
                 )
         self.assertEqual(result, 2)
+
+    def test_translation_can_detect_the_source_language(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "recording.mp4"
+            source.touch()
+            executable = root / "mlx_whisper"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+
+            with mock.patch("transcribe_media.subprocess.run") as run:
+                result = transcribe_media.main(
+                    [
+                        str(source),
+                        "--auto-language",
+                        "--translate-to",
+                        "en",
+                        "--whisper-bin",
+                        str(executable),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--task") + 1], "translate")
+        self.assertNotIn("--language", command)
 
     def test_update_replaces_only_installed_script(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
