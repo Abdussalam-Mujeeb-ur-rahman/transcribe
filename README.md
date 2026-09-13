@@ -4,6 +4,8 @@ Transcribe audio and video locally on an Apple Silicon Mac with
 [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
 The default result is a readable TXT transcript saved beside the source.
 Timestamped subtitle output is available as SRT or VTT.
+Turkish recordings can also be translated directly into English TXT or
+English subtitles without installing another translation service.
 
 The tool is useful for voice notes, meetings, interviews, and screen
 recordings. It supports OPUS, OGG, M4A, MP3, WAV, MP4, and MOV input through
@@ -38,6 +40,19 @@ When setup finishes, start with:
 transcribe --help
 ```
 
+## Fast updates
+
+If `transcribe` is already installed, get the latest project command with:
+
+```bash
+transcribe --update
+```
+
+This downloads and validates only the latest small `transcribe` script. It
+does **not** reinstall Homebrew, Python, FFmpeg, `pipx`, MLX Whisper, or any
+downloaded model, so an update should be much faster than first-time setup.
+Your existing model cache and transcripts remain untouched.
+
 ## Demo
 
 Run `transcribe --help`, then transcribe a file directly from Terminal:
@@ -55,8 +70,8 @@ TXT result:
 
 ## Privacy
 
-Transcription runs on your Mac. Recordings are not sent to a hosted
-transcription API by this project. The selected model is downloaded from
+Transcription and Turkish-to-English translation run on your Mac. Recordings
+are not sent to a hosted transcription API by this project. The selected model is downloaded from
 Hugging Face on first use and cached locally, so the first run can take longer
 and requires internet access. Later transcription can run from the local model
 cache.
@@ -164,6 +179,39 @@ transcribe "/path/to/recording.mov" --auto-language
 
 If both options are supplied, `--auto-language` takes precedence.
 
+## Translate Turkish to English
+
+Use `--language tr --translate-to en`. For a movie, choose SRT to keep subtitle
+timestamps:
+
+```bash
+transcribe "/path/to/turkish-movie.mp4" \
+  --language tr \
+  --translate-to en \
+  --format srt
+```
+
+The English subtitle is saved beside the movie:
+
+```text
+turkish-movie.mp4
+turkish-movie_english_translation.srt
+```
+
+For an English plain-text translation instead:
+
+```bash
+transcribe "/path/to/turkish-audio.m4a" \
+  --language tr \
+  --translate-to en \
+  --format txt
+```
+
+This is speech translation, not dubbed audio: the result is English text or
+English subtitle files. The original recording is never modified. Music,
+background noise, overlapping dialogue, and unclear speech can reduce subtitle
+accuracy, so review important results against the movie.
+
 ## Model selection
 
 The default model is `mlx-community/whisper-small-mlx`, a practical speed and
@@ -182,14 +230,19 @@ downloaded on its first use. Set a reusable default with:
 export MLX_WHISPER_MODEL="mlx-community/whisper-small-mlx"
 ```
 
+For translation, keep the multilingual default model or another multilingual
+Whisper model. Do not use a `.en`-only model. Whisper's `turbo` model is aimed
+at transcription and is not recommended for translation.
+
 ## Command-line options
 
 ```text
 usage: transcribe [-h] [--out-dir OUT_DIR]
                   [--format {txt,srt,vtt,tsv,json,all}]
                   [--language LANGUAGE] [--auto-language]
+                  [--translate-to {en}] [--update] [--version]
                   [--model MODEL] [--whisper-bin WHISPER_BIN] [--verbose]
-                  input
+                  [input]
 
 positional arguments:
   input                 Path to an audio or video file
@@ -200,6 +253,9 @@ options:
   --format FORMAT       txt, srt, vtt, tsv, json, or all; defaults to txt
   --language LANGUAGE   Spoken language code; defaults to en
   --auto-language       Let Whisper detect the spoken language
+  --translate-to en     Translate Turkish speech into English
+  --update              Update the command without reinstalling dependencies
+  --version             Show the installed transcribe version
   --model MODEL         Hugging Face model name or local model path
   --whisper-bin PATH    mlx_whisper executable name or explicit path
   --verbose             Show detailed MLX Whisper arguments and segments
@@ -248,6 +304,11 @@ ffprobe "/path/to/recording.mp4"
 The default model is probably downloading. Allow roughly 500 MB of free space;
 download time depends on your connection. Later runs reuse the cache, although
 larger models still take longer to download and transcribe.
+
+The one-command setup itself can also take 20–30 minutes or longer on a slow
+connection because Homebrew, Python tools, MLX Whisper, and the first model may
+need to be downloaded. This is a first-time cost. Later use reuses those files,
+and `transcribe --update` does not download them again.
 
 ### The transcript is inaccurate
 

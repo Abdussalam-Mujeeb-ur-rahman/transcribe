@@ -221,6 +221,7 @@ verify_installation() {
     printf '\nInstallation complete.\n'
     printf 'Command: %s\n' "$COMMAND_PATH"
     printf 'Try: transcribe --help\n'
+    printf 'Future updates: transcribe --update\n'
     printf 'Then: type transcribe, add a space, and drag an audio or video file into Terminal.\n\n'
     "$COMMAND_PATH" --help | sed -n '1,12p'
 }

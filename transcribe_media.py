@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcribe one audio or video file locally with MLX Whisper."""
+"""Transcribe or translate one audio or video file with MLX Whisper."""
 
 from __future__ import annotations
 
@@ -8,27 +8,46 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional, Sequence
 
 
+VERSION = "1.1.0"
 DEFAULT_MODEL = "mlx-community/whisper-small-mlx"
 OUTPUT_FORMATS = ("txt", "srt", "vtt", "tsv", "json", "all")
+RAW_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/Abdussalam-Mujeeb-ur-rahman/"
+    "transcribe/main/transcribe_media.py"
+)
 
 
-def output_name_for(source: Path) -> str:
+def output_name_for(source: Path, translated_to_english: bool = False) -> str:
     """Return the extension-free transcript name used by MLX Whisper."""
     # mlx_whisper treats dots in --output-name as extension separators.
     safe_stem = source.stem.replace(".", "-")
-    return f"{safe_stem}_transcript"
+    suffix = "_english_translation" if translated_to_english else "_transcript"
+    return f"{safe_stem}{suffix}"
+
+
+def install_dir() -> Path:
+    """Return the user-level directory used by the public installer."""
+    configured = os.environ.get("TRANSCRIBE_INSTALL_DIR")
+    return Path(configured).expanduser() if configured else (
+        Path.home() / ".local" / "share" / "transcribe"
+    )
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="transcribe",
-        description="Create a local transcript from an audio or video file.",
+        description="Create a local transcript or Turkish-to-English translation.",
     )
-    parser.add_argument("input", type=Path, help="Path to an audio or video file")
+    parser.add_argument(
+        "input", nargs="?", type=Path, help="Path to an audio or video file"
+    )
     parser.add_argument(
         "--out-dir",
         type=Path,
@@ -49,6 +68,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--auto-language",
         action="store_true",
         help="Let Whisper detect the spoken language",
+    )
+    parser.add_argument(
+        "--translate-to",
+        choices=("en",),
+        help="Translate Turkish speech into English (use: --language tr)",
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Update only the transcribe command; keep dependencies and models",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {VERSION}"
     )
     parser.add_argument(
         "--model",
@@ -95,8 +127,58 @@ def find_executable(value: str) -> str | None:
     return None
 
 
+def update_command() -> int:
+    """Download, validate, and atomically install the latest command script."""
+    target_dir = install_dir()
+    target = target_dir / "transcribe_media.py"
+    update_url = os.environ.get("TRANSCRIBE_UPDATE_URL", RAW_SCRIPT_URL)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+
+    print("Checking for the latest transcribe command...", flush=True)
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="transcribe-update-",
+            suffix=".py",
+            dir=target_dir,
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            with urllib.request.urlopen(update_url, timeout=30) as response:
+                shutil.copyfileobj(response, temporary)
+        source_code = temporary_path.read_text(encoding="utf-8")
+        if not source_code.startswith("#!/usr/bin/env python3") or (
+            "def main(" not in source_code or "VERSION =" not in source_code
+        ):
+            raise ValueError("the downloaded file is not a transcribe release")
+        compile(source_code, str(temporary_path), "exec")
+        temporary_path.chmod(0o755)
+        os.replace(temporary_path, target)
+    except (
+        OSError,
+        SyntaxError,
+        UnicodeError,
+        ValueError,
+        urllib.error.URLError,
+    ) as error:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        print(f"Update failed: {error}", file=sys.stderr)
+        return 1
+
+    print(f"Updated transcribe at {target}")
+    print("MLX Whisper, FFmpeg, Python, pipx, and downloaded models were untouched.")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+    if args.update:
+        return update_command()
+    if args.input is None:
+        print("An input file is required. Try: transcribe --help", file=sys.stderr)
+        return 2
+
     source = args.input.expanduser().resolve()
     if not source.is_file():
         print(f"Input file not found: {source}", file=sys.stderr)
@@ -113,7 +195,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     out_dir = (args.out_dir or source.parent).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    output_name = output_name_for(source)
+    if args.translate_to and args.auto_language:
+        print(
+            "For Turkish translation, use --language tr instead of --auto-language.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.translate_to and args.language != "tr":
+        print(
+            "Turkish-to-English translation requires --language tr.",
+            file=sys.stderr,
+        )
+        return 2
+
+    output_name = output_name_for(
+        source, translated_to_english=bool(args.translate_to)
+    )
 
     command = [
         whisper_bin,
@@ -121,7 +218,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--model",
         args.model,
         "--task",
-        "transcribe",
+        "translate" if args.translate_to else "transcribe",
         "--output-format",
         args.format,
         "--output-name",
@@ -134,7 +231,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.auto_language:
         command.extend(["--language", args.language])
 
-    print(f"Transcribing: {source.name}", flush=True)
+    action = (
+        "Transcribing and translating to English"
+        if args.translate_to
+        else "Transcribing"
+    )
+    print(f"{action}: {source.name}", flush=True)
     try:
         subprocess.run(command, check=True)
     except KeyboardInterrupt:
