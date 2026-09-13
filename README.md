@@ -12,6 +12,8 @@ recordings. It supports OPUS, OGG, M4A, MP3, WAV, MP4, and MOV input through
 FFmpeg. Other FFmpeg-compatible formats may also work but are not part of the
 tested interface.
 
+![Transcribe Lab showing a completed local transcription with waveform, command preview, progress metrics, and saved output](docs/images/transcribe-lab-success.png)
+
 ## One-command setup
 
 Paste this single command into Terminal:
@@ -66,6 +68,15 @@ lighter long-session theme. The browser does not upload or copy recordings.
 It talks only to a temporary localhost server, while FFmpeg and MLX Whisper
 process the original paths on your Mac. **LOCAL / PRIVATE — ENFORCED** cannot
 be turned off because this project has no cloud transcription mode.
+
+Load a recording to inspect its waveform and technical details before running:
+
+![Transcribe Lab ready to transcribe a loaded video](docs/images/transcribe-lab-ready.png)
+
+During transcription, the process stream and progress panel show live status,
+elapsed time, remaining time, and processing speed:
+
+![Transcribe Lab processing a video with live progress and speed](docs/images/transcribe-lab-running.png)
 
 Open either experience directly with:
 
