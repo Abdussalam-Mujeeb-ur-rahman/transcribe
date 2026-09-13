@@ -37,8 +37,37 @@ installed. Dependency setup can take several minutes. You can
 When setup finishes, start with:
 
 ```bash
-transcribe --help
+transcribe
 ```
+
+## Simple interface or Terminal
+
+Run `transcribe` without a file to choose how you want to continue:
+
+```text
+Welcome to Transcribe
+
+1) Open the simple interface
+2) Continue with guided Terminal mode
+3) Show command help
+```
+
+The simple interface opens locally in your default browser. Choose an audio or
+video file with the native macOS picker, select transcription or Turkish →
+English translation, choose the output format and folder, and follow progress
+on the page. The browser does not upload or copy the recording; the existing
+command processes its path directly on your Mac.
+
+Open either experience directly with:
+
+```bash
+transcribe --ui
+transcribe --guided
+```
+
+Keep the launching Terminal window open while the simple interface is running.
+Use **Quit local interface** on the page when finished. Existing file-based
+commands continue to work exactly as before.
 
 ## Fast updates
 
@@ -246,7 +275,8 @@ at transcription and is not recommended for translation.
 usage: transcribe [-h] [--out-dir OUT_DIR]
                   [--format {txt,srt,vtt,tsv,json,all}]
                   [--language LANGUAGE] [--auto-language]
-                  [--translate-to {en}] [--update] [--version]
+                  [--translate-to {en}] [--update] [--ui] [--guided]
+                  [--version]
                   [--model MODEL] [--whisper-bin WHISPER_BIN] [--verbose]
                   [input]
 
@@ -261,6 +291,8 @@ options:
   --auto-language       Let Whisper detect the spoken language
   --translate-to en     Translate Turkish speech into English
   --update              Update the command without reinstalling dependencies
+  --ui                  Open the simple local interface in your browser
+  --guided              Start an interactive guided Terminal session
   --version             Show the installed transcribe version
   --model MODEL         Hugging Face model name or local model path
   --whisper-bin PATH    mlx_whisper executable name or explicit path

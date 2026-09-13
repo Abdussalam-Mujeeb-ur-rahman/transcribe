@@ -54,6 +54,52 @@ class TranscribeMediaTests(unittest.TestCase):
         self.assertFalse(default_args.verbose)
         self.assertTrue(verbose_args.verbose)
 
+    def test_interface_flags_do_not_require_an_input_file(self) -> None:
+        ui_args = transcribe_media.parse_args(["--ui"])
+        guided_args = transcribe_media.parse_args(["--guided"])
+
+        self.assertTrue(ui_args.ui)
+        self.assertTrue(guided_args.guided)
+        self.assertIsNone(ui_args.input)
+
+    def test_all_formats_reveals_the_text_result(self) -> None:
+        result = transcribe_media.expected_output_path(
+            Path("voice.opus"), Path("/tmp/results"), "all", False
+        )
+        self.assertEqual(result, Path("/tmp/results/voice_transcript.txt"))
+
+    def test_native_file_picker_returns_selected_path(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["osascript"], returncode=0, stdout="/tmp/movie.mp4\n"
+        )
+        with mock.patch("transcribe_media.subprocess.run", return_value=completed):
+            result = transcribe_media.choose_with_macos("Choose a file")
+
+        self.assertEqual(result, Path("/tmp/movie.mp4"))
+
+    def test_interface_cancel_stops_the_complete_process_group(self) -> None:
+        job = transcribe_media.LocalJob()
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.pid = 9876
+        job.process = process
+
+        with mock.patch("transcribe_media.os.killpg") as kill_group:
+            cancelled = job.cancel()
+
+        self.assertTrue(cancelled)
+        self.assertEqual(job.state, "cancelling")
+        kill_group.assert_called_once_with(9876, transcribe_media.signal.SIGTERM)
+
+    def test_no_argument_menu_can_open_guided_mode(self) -> None:
+        with mock.patch("builtins.input", return_value="2"), mock.patch(
+            "transcribe_media.guided_terminal", return_value=17
+        ) as guided:
+            result = transcribe_media.launch_menu()
+
+        self.assertEqual(result, 17)
+        guided.assert_called_once_with()
+
     def test_turkish_to_english_uses_whisper_translate_task(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
