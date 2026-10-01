@@ -1,16 +1,25 @@
 # Transcribe
 
-Transcribe audio and video locally on an Apple Silicon Mac with
-[MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
-The default result is a readable TXT transcript saved beside the source.
-Timestamped subtitle output is available as SRT or VTT.
-Supported non-English recordings can also be translated directly into English
-TXT or English subtitles without installing another translation service.
+Transcribe speech in its original language or translate it into English,
+**locally on Android phones and Apple Silicon Macs**. There is no account or
+hosted transcription API; your recordings stay on your device.
 
-The tool is useful for voice notes, meetings, interviews, and screen
-recordings. It supports OPUS, OGG, M4A, MP3, WAV, MP4, and MOV input through
-FFmpeg. Other FFmpeg-compatible formats may also work but are not part of the
-tested interface.
+Choose your platform:
+
+- **Android (public beta):** [Download the signed APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1)
+  for Android 10+ ARM64 phones, then follow the [Android setup guide](android/README.md#download-and-install).
+  The native app uses `whisper.cpp` for voice-note transcription and English translation.
+- **Apple Silicon Mac:** Use the [one-command setup](#one-command-setup) for
+  macOS 14+. Run `transcribe` to choose the visual Transcribe Lab or Terminal.
+  The Mac app uses [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
+  for audio and video.
+
+Both platforms support readable TXT and timestamped subtitle output. On Mac,
+transcripts are saved beside the source by default; OPUS, OGG, M4A, MP3, WAV,
+MP4, and MOV inputs are supported through FFmpeg. Other FFmpeg-compatible
+formats may also work but are not part of the tested interface.
+
+The Mac Transcribe Lab interface:
 
 ![Transcribe Lab showing a completed local transcription with waveform, command preview, progress metrics, and saved output](docs/images/transcribe-lab-success.png)
 
