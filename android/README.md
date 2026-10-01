@@ -85,6 +85,16 @@ The first launch needs internet to download the model. The app does not request
 broad file access; shared recordings are copied into app-private temporary
 storage for decoding and then removed. The model remains in private app storage.
 
+## Future beta updates
+
+Maintainers should increase `versionCode` for each new APK, build a release APK,
+and sign it with the **same release key** used for this beta. Publish the new
+APK on GitHub Releases. With the same app ID and signing key, Android can
+install a newer version over an existing release without downloading the model
+again. The release key and its password are stored outside this repository;
+keep a secure backup of both and never commit them. The earlier Pixel debug
+build uses a different key and cannot be updated in place to the first beta.
+
 ## First physical-device check
 
 1. Open the app, download Base, and confirm that it says the model is ready.
