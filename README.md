@@ -14,6 +14,19 @@ tested interface.
 
 ![Transcribe Lab showing a completed local transcription with waveform, command preview, progress metrics, and saved output](docs/images/transcribe-lab-success.png)
 
+## Android prototype
+
+An early native Android app is now in [`android/`](android/README.md). It is a
+separate, on-device path for transcribing speech in its original language or
+translating it into English. It offers TXT, SRT, VTT, TSV, and JSON output.
+The Mac installer below does not install the Android app. On a Pixel 7, synthetic
+Opus clips have passed English transcription, Spanish transcription, Spanish-to-
+English translation, SRT rendering, and live progress checks. A Spanish voice
+note chosen from the phone's files also worked in both modes. Direct WhatsApp
+sharing and the optional larger model still need testing before an Android release.
+There is [no public Android APK yet](android/README.md#download-status); the
+Android README shows the current result screen and developer build steps.
+
 ## One-command setup
 
 Paste this single command into Terminal:

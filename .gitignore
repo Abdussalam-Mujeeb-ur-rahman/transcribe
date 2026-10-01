@@ -39,3 +39,9 @@ models/
 *_transcript.json
 test-output/
 tmp/
+
+# Android prototype build output and machine-specific SDK paths
+android/.gradle/
+android/**/.cxx/
+android/**/build/
+android/local.properties
