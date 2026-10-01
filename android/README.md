@@ -21,15 +21,21 @@ ZIP are not Android installers.
 
 1. On your phone, download the **APK** from the release page and open it.
    If Android asks, allow installation from the browser or Files app you used.
-2. Open Transcribe Lab and download the multilingual Base model (about 142 MiB)
-   once. The model download needs internet; transcription then runs locally.
+2. Open Transcribe Lab and choose a multilingual model:
+   - **Base (~142 MiB):** faster processing and a smaller download.
+   - **Small (~466 MiB):** slower processing and a larger download, but may
+     produce a more accurate transcript or translation, especially on difficult
+     speech. Despite its name, Small is larger than Base.
+   Download the model once with internet; processing then runs locally. Small
+   is an accuracy-oriented choice, not a guarantee that every word is correct.
 3. Choose an audio recording, select **Transcribe** to keep its spoken language
    or **Translate to English**, then review, copy, share, or save the result.
 
 This is a pre-release, not a stable Android launch. Direct sharing from
-WhatsApp into this build, the optional Small model, long recordings, and
-subtitle save/share on-device still need broader testing. Keep the app open
-during processing and review important words before using the transcript.
+WhatsApp into this build, Small-model performance on the Pixel 7, long
+recordings, and subtitle save/share on-device still need broader testing. Keep
+the app open during processing and review important words before using the
+transcript.
 
 **Already using the Pixel debug APK?** It has a different signing certificate.
 Save any transcript you need, uninstall that debug app, then install this beta.

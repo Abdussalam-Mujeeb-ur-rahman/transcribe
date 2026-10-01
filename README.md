@@ -21,11 +21,13 @@ separate, on-device path for transcribing speech in its original language or
 translating it into English. It offers TXT, SRT, VTT, TSV, and JSON output.
 **[Download the signed Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1)**
 for Android 10+ ARM64 phones. The Mac installer below does not install the
-Android app. On a Pixel 7, synthetic Opus clips passed English transcription,
-Spanish transcription, Spanish-to-English translation, SRT rendering, and live
-progress checks. A Spanish voice note chosen from the phone's files also worked
-in both modes. Direct WhatsApp sharing and the optional larger model still need
-broader testing. See the
+Android app. Choose **Base** for faster processing or **Small** for slower,
+potentially more accurate results; Small needs a larger download and has not
+yet had a full Pixel 7 performance check. On a Pixel 7, synthetic Opus clips
+passed English transcription, Spanish transcription, Spanish-to-English
+translation, SRT rendering, and live progress checks. A Spanish voice note
+chosen from the phone's files also worked in both modes. Direct WhatsApp sharing
+and the optional larger model still need broader testing. See the
 [Android README](android/README.md#download-and-install) for installation steps,
 the result screen, and beta limitations.
 
