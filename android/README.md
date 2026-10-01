@@ -1,4 +1,4 @@
-# Transcribe Lab for Android — prototype
+# Transcribe Lab for Android — beta
 
 This is an early native Android prototype, separate from the Apple Silicon
 Mac app. Its intended path is **WhatsApp → Share → Transcribe Lab → text**,
@@ -12,17 +12,33 @@ Processing runs on the phone with `whisper.cpp`.
 *Pixel 7 prototype with a synthetic 49-second Spanish voice note. This shows the
 result screen, not a guarantee of word-for-word accuracy on every recording.*
 
-## Download status
+## Download and install
 
-There is **no public Android download yet**. The app has been built and tested
-locally on a Pixel 7, but its APK has not been published as a signed release.
-The Mac installer and GitHub source-code ZIP are not Android installers.
+The signed [Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.1/transcribe-lab-android-v0.2.0-beta.1.apk)
+is available from the [v0.2.0-beta.1 release](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1).
+It is for Android 10+ ARM64 phones. The Mac installer and GitHub source-code
+ZIP are not Android installers.
 
-For a public beta, the intended download location is this repository's
-[GitHub Releases](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases)
-page. Once a signed Android APK is published there, users will be able to
-download that APK on their phone and install it. Until then, the build steps
-below are for developers testing from source, not an end-user download path.
+1. On your phone, download the **APK** from the release page and open it.
+   If Android asks, allow installation from the browser or Files app you used.
+2. Open Transcribe Lab and download the multilingual Base model (about 142 MiB)
+   once. The model download needs internet; transcription then runs locally.
+3. Choose an audio recording, select **Transcribe** to keep its spoken language
+   or **Translate to English**, then review, copy, share, or save the result.
+
+This is a pre-release, not a stable Android launch. Direct sharing from
+WhatsApp into this build, the optional Small model, long recordings, and
+subtitle save/share on-device still need broader testing. Keep the app open
+during processing and review important words before using the transcript.
+
+**Already using the Pixel debug APK?** It has a different signing certificate.
+Save any transcript you need, uninstall that debug app, then install this beta.
+Uninstalling removes app-private models and unsaved data; the model will need
+downloading again. Later signed beta updates can install over this release.
+
+APK SHA-256: `5eb9fa38162afeb13f95bf7b72cca0f412bf923348beffe8077603cc1c901d92`.
+The matching [checksum file](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.1/transcribe-lab-android-v0.2.0-beta.1.apk.sha256)
+is attached to the release.
 
 ## Current scope
 
@@ -108,5 +124,5 @@ build uses a different key and cannot be updated in place to the first beta.
 5. Only if you want the extra download, try Small on a difficult recording and
    compare results. Also observe run time, heat, and battery on longer notes.
 
-Until a real WhatsApp-share check passes, this should be treated as a developer
-prototype, not as a supported Android release.
+Until a real WhatsApp-share check passes, this should be treated as a public
+beta rather than a supported stable Android release.
