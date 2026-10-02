@@ -12,8 +12,9 @@ android {
         applicationId = "dev.transcribelab.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.0-beta.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -33,7 +34,7 @@ android {
         jvmTarget = "17"
     }
 
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     externalNativeBuild {
         cmake {
@@ -55,5 +56,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.1")
     implementation("androidx.core:core-ktx:1.16.0")
+    implementation("com.google.mlkit:translate:17.0.3")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

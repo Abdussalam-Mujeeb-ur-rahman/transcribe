@@ -7,7 +7,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,7 +41,8 @@ class MainActivity : ComponentActivity() {
         receiveSharedAudio(intent)
         setContent {
             val state by model.state.collectAsState()
-            val working = state.stage == Stage.PREPARING || state.stage == Stage.PROCESSING
+            val working = state.stage == Stage.PREPARING || state.stage == Stage.PROCESSING ||
+                state.stage == Stage.TRANSLATING
             DisposableEffect(working) {
                 if (working) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -67,6 +70,8 @@ class MainActivity : ComponentActivity() {
                     onHint = model::setSpeechHint,
                     onFormat = model::setOutputFormat,
                     onRun = model::run,
+                    onRetryTranslation = model::retryTranslation,
+                    onManageLanguages = ::openOfflineLanguageSettings,
                     onCancel = model::cancel,
                     onEditSegment = model::editSegment,
                     onCopy = ::copyResult,
@@ -111,7 +116,13 @@ class MainActivity : ComponentActivity() {
     private fun saveResult() {
         val result = model.state.value
         val name = result.fileName?.substringBeforeLast('.') ?: "voice-note"
-        val suffix = if (result.mode == TaskMode.TRANSLATE_TO_ENGLISH) "_english" else "_transcript"
+        val suffix = if (result.resultIsTranslation) "_english" else "_transcript"
         saveText.launch("$name$suffix.${result.outputFormat.extension}")
+    }
+
+    private fun openOfflineLanguageSettings() {
+        if (Build.VERSION.SDK_INT < 31) return
+        startActivity(Intent(Settings.ACTION_SETTINGS))
+        Toast.makeText(this, "In Settings, search for Live Translate or offline languages.", Toast.LENGTH_LONG).show()
     }
 }

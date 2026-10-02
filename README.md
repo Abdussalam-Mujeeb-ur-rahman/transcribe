@@ -6,9 +6,11 @@ hosted transcription API; your recordings stay on your device.
 
 Choose your platform:
 
-- **Android (public beta):** [Download the signed APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1)
+- **Android (public beta):** [Download the signed APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.2)
   for Android 10+ ARM64 phones, then follow the [Android setup guide](android/README.md#download-and-install).
-  The native app uses `whisper.cpp` for voice-note transcription and English translation.
+  The native app uses `whisper.cpp` to transcribe voice notes. For English
+  translation it first preserves the original transcript, then translates that
+  text locally with an on-device language pack.
 - **Apple Silicon Mac:** Use the [one-command setup](#one-command-setup) for
   macOS 14+. Run `transcribe` to choose the visual Transcribe Lab or Terminal.
   The Mac app uses [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
@@ -28,15 +30,15 @@ The Mac Transcribe Lab interface:
 The native Android app is in [`android/`](android/README.md). It is a
 separate, on-device path for transcribing speech in its original language or
 translating it into English. It offers TXT, SRT, VTT, TSV, and JSON output.
-**[Download the signed Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1)**
+**[Download the signed Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.2)**
 for Android 10+ ARM64 phones. The Mac installer below does not install the
 Android app. Choose **Base** for faster processing or **Small** for slower,
-potentially more accurate results; Small needs a larger download and has not
-yet had a full Pixel 7 performance check. On a Pixel 7, synthetic Opus clips
-passed English transcription, Spanish transcription, Spanish-to-English
-translation, SRT rendering, and live progress checks. A Spanish voice note
-chosen from the phone's files also worked in both modes. Direct WhatsApp sharing
-and the optional larger model still need broader testing. See the
+potentially more accurate results; Small needs a larger download. On a Pixel 7,
+a 49-second synthetic Spanish Opus clip passed the two-stage Small-model
+transcription and English translation flow; the original Spanish remained
+available. Earlier beta checks covered English and Spanish transcription, SRT
+rendering, and live progress. Direct WhatsApp sharing, real-world translation
+quality, and longer recordings still need broader testing. See the
 [Android README](android/README.md#download-and-install) for installation steps,
 the result screen, and beta limitations.
 

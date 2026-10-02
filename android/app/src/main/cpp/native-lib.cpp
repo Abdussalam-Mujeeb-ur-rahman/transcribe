@@ -77,7 +77,6 @@ Java_dev_transcribelab_android_WhisperBridge_process(
     jstring modelPath,
     jfloatArray samples,
     jstring sourceLanguage,
-    jboolean translateToEnglish,
     jstring prompt,
     jobject progressListener
 ) {
@@ -147,7 +146,7 @@ Java_dev_transcribelab_android_WhisperBridge_process(
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads = 4;
     params.language = language.c_str();
-    params.translate = translateToEnglish == JNI_TRUE;
+    params.translate = false;
     params.initial_prompt = speechHint.empty() ? nullptr : speechHint.c_str();
     params.no_timestamps = false;
     params.print_progress = false;
@@ -186,8 +185,18 @@ Java_dev_transcribelab_android_WhisperBridge_process(
         }
     }
 
+    const int detectedLanguageId = whisper_full_lang_id(context);
+    const char *detectedLanguage = detectedLanguageId >= 0 ? whisper_lang_str(detectedLanguageId) : language.c_str();
+    jstring languageResult = env->NewStringUTF(detectedLanguage);
+    jclass resultClass = env->FindClass("dev/transcribelab/android/WhisperResult");
+    jmethodID resultConstructor = resultClass == nullptr ? nullptr :
+        env->GetMethodID(resultClass, "<init>", "(Ljava/util/ArrayList;Ljava/lang/String;)V");
+    jobject result = resultConstructor == nullptr ? nullptr :
+        env->NewObject(resultClass, resultConstructor, results, languageResult);
+    if (resultClass != nullptr) env->DeleteLocalRef(resultClass);
+    if (languageResult != nullptr) env->DeleteLocalRef(languageResult);
     env->DeleteLocalRef(segmentClass);
     env->DeleteLocalRef(listClass);
     whisper_free(context);
-    return env->ExceptionCheck() ? nullptr : results;
+    return env->ExceptionCheck() ? nullptr : result;
 }

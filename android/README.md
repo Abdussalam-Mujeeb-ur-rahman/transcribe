@@ -14,8 +14,8 @@ result screen, not a guarantee of word-for-word accuracy on every recording.*
 
 ## Download and install
 
-The signed [Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.1/transcribe-lab-android-v0.2.0-beta.1.apk)
-is available from the [v0.2.0-beta.1 release](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.1).
+The signed [Android beta APK](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.2/transcribe-lab-android-v0.2.0-beta.2.apk)
+is available from the [v0.2.0-beta.2 release](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/tag/v0.2.0-beta.2).
 It is for Android 10+ ARM64 phones. The Mac installer and GitHub source-code
 ZIP are not Android installers.
 
@@ -30,9 +30,23 @@ ZIP are not Android installers.
    is an accuracy-oriented choice, not a guarantee that every word is correct.
 3. Choose an audio recording, select **Transcribe** to keep its spoken language
    or **Translate to English**, then review, copy, share, or save the result.
+   For translation, the app first transcribes the original speech, then locally
+   translates the written transcript. The original remains available to expand
+   beneath the English result.
+
+On Android 12+, tap **Manage offline languages** to open Settings and search
+for **Live Translate** or **offline languages**. Install the source language
+pack (for example, Spanish) if translation asks for it. The system
+may default to Wi-Fi-only downloads; you can change that in its language
+settings if you choose to use mobile data. If the system translator is not
+available, the app tries a separate on-device ML Kit language pack. First-time
+pack downloads need internet and can take time. Audio and text processing stay
+on the phone. If a pack is unavailable or translation fails, the original
+transcript is retained; **Retry English Translation** does not run speech
+recognition again. Review names and important details before sharing.
 
 This is a pre-release, not a stable Android launch. Direct sharing from
-WhatsApp into this build, Small-model performance on the Pixel 7, long
+WhatsApp into this build, real-world Small-model accuracy, long
 recordings, and subtitle save/share on-device still need broader testing. Keep
 the app open during processing and review important words before using the
 transcript.
@@ -42,8 +56,8 @@ Save any transcript you need, uninstall that debug app, then install this beta.
 Uninstalling removes app-private models and unsaved data; the model will need
 downloading again. Later signed beta updates can install over this release.
 
-APK SHA-256: `5eb9fa38162afeb13f95bf7b72cca0f412bf923348beffe8077603cc1c901d92`.
-The matching [checksum file](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.1/transcribe-lab-android-v0.2.0-beta.1.apk.sha256)
+APK SHA-256: `5d1769a8b65f633a20873e281c6d7ca1cf3998c8ba402accbe9d6b64ca9ffbe4`.
+The matching [checksum file](https://github.com/Abdussalam-Mujeeb-ur-rahman/transcribe/releases/download/v0.2.0-beta.2/transcribe-lab-android-v0.2.0-beta.2.apk.sha256)
 is attached to the release.
 
 ## Current scope
@@ -70,17 +84,16 @@ is attached to the release.
 - Keep the app open during processing. Background processing, notification
   controls, and multi-file jobs are not built yet.
 
-On a Pixel 7 running Android 17, synthetic Opus samples were tested in all
-three core paths: English speech to English text, Spanish speech to Spanish
-text, and Spanish speech to English text. The Spanish runs also rendered SRT
-subtitles with timestamps. An Android-granted `ACTION_SEND` URI worked in an
-earlier check. A 35-second synthetic clip showed a real, nonzero progress
-percentage while processing. The optimized debug build completed short samples
-in seconds to tens of seconds. A Spanish Opus voice note selected through the
-phone's file picker also produced Spanish transcription and English translation.
-These checks do **not** yet validate sharing directly from WhatsApp with this
-version, the optional Small model, subtitle save/share on-device, or sustained
-performance and battery use on long recordings.
+On a Pixel 7 running Android 17, a 49-second synthetic Spanish Opus sample
+passed the complete Small-model path: Spanish source transcript, local English
+text translation, and TXT export of the English result. The original Spanish
+remained expandable on screen. The installed system translation pack passed a
+separate Spanish-to-English test with Wi-Fi and mobile data both disabled.
+Earlier beta checks covered English transcription, Spanish transcription,
+timed SRT, an Android-granted `ACTION_SEND` URI, and nonzero progress feedback.
+These checks do **not** prove word-for-word accuracy on a client's voice note,
+direct WhatsApp sharing, reliable first-time language-pack downloads on every
+network, or sustained performance and battery use on long recordings.
 
 Speech recognition can mishear a phrase that is acoustically ambiguous. The
 app does not silently rewrite guessed words into a different meaning. For
@@ -91,8 +104,16 @@ segment.
 
 ## Build
 
+The published `v0.2.0-beta.2` APK includes the two-stage local English
+translation flow. On Android 12+, an installed system translation pack is
+preferred; if unavailable, Google ML Kit attempts an on-device model download.
+Whisper transcribes the original speech first. Downloading models may contact
+their provider, but the voice note and transcript are not sent to a hosted
+transcription or translation API. Automatic translations still need review,
+especially for names and business details.
+
 Install JDK 17 and the Android SDK with platform 36, build tools 36.0.0,
-NDK 27.0.12077973, and CMake 3.22.1. Set `ANDROID_HOME` to your SDK path.
+NDK 28.2.13676358, and CMake 3.22.1. Set `ANDROID_HOME` to your SDK path.
 From this directory run:
 
 ```bash

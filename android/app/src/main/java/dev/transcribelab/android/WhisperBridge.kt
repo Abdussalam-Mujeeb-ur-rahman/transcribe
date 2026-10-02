@@ -1,6 +1,7 @@
 package dev.transcribelab.android
 
 data class Segment(val startSeconds: Float, val endSeconds: Float, val text: String)
+data class WhisperResult(val segments: ArrayList<Segment>, val language: String)
 
 class WhisperBridge {
     fun interface ProgressListener {
@@ -11,10 +12,9 @@ class WhisperBridge {
         modelPath: String,
         samples: FloatArray,
         sourceLanguage: String,
-        translateToEnglish: Boolean,
         prompt: String,
         progressListener: ProgressListener,
-    ): ArrayList<Segment>
+    ): WhisperResult
 
     external fun cancel()
 

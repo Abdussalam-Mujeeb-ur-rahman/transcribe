@@ -2,6 +2,7 @@ package dev.transcribelab.android
 
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import androidx.compose.ui.text.font.FontFamily
@@ -87,20 +90,28 @@ fun ResultFirstScreen(
     onHint: (String) -> Unit,
     onFormat: (OutputFormat) -> Unit,
     onRun: () -> Unit,
+    onRetryTranslation: () -> Unit,
+    onManageLanguages: () -> Unit,
     onCancel: () -> Unit,
     onEditSegment: (Int, String) -> Unit,
     onCopy: () -> Unit,
     onShare: () -> Unit,
     onSave: () -> Unit,
 ) {
-    val busy = state.stage in setOf(Stage.DOWNLOADING, Stage.PREPARING, Stage.PROCESSING)
+    val busy = state.stage in setOf(Stage.DOWNLOADING, Stage.PREPARING, Stage.PROCESSING, Stage.TRANSLATING)
     val done = state.stage == Stage.DONE
+    val uriHandler = LocalUriHandler.current
     var settingsExpanded by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    var originalExpanded by remember { mutableStateOf(false) }
+    var translationNoticeOpen by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(state.stage) {
-        if (state.stage != Stage.DONE) editing = false
+        if (state.stage != Stage.DONE) {
+            editing = false
+            originalExpanded = false
+        }
         settingsExpanded = state.stage != Stage.DONE
     }
     LaunchedEffect(busy) {
@@ -194,13 +205,20 @@ fun ResultFirstScreen(
                     onFormat = onFormat,
                     onDownload = onDownload,
                 )
+                if (state.mode == TaskMode.TRANSLATE_TO_ENGLISH && Build.VERSION.SDK_INT >= 31 &&
+                    !busy) {
+                    OutlinedButton(onClick = onManageLanguages) {
+                        Text("MANAGE OFFLINE LANGUAGES")
+                    }
+                }
             }
 
             if (busy && state.stage != Stage.DOWNLOADING) {
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    SmallLabel("PROCESSING / ${shortTime(elapsedSeconds)} ELAPSED")
+                    SmallLabel("${if (state.stage == Stage.TRANSLATING) "TRANSLATING TEXT" else "TRANSCRIBING SPEECH"} / ${shortTime(elapsedSeconds)} ELAPSED")
                     Text(
                         if (state.stage == Stage.PREPARING) "Preparing the recording…" else
+                            if (state.stage == Stage.TRANSLATING) state.message else
                             if (state.progress > 0) "Speech processed: ${state.progress}%" else "Analyzing speech…",
                         color = Color.White,
                     )
@@ -219,8 +237,19 @@ fun ResultFirstScreen(
             }
 
             if (done) {
+                if (state.mode == TaskMode.TRANSLATE_TO_ENGLISH && !state.resultIsTranslation &&
+                    state.originalSegments.isNotEmpty() && state.detectedLanguage != "en") {
+                    OutlinedButton(onClick = onRetryTranslation) {
+                        Text("RETRY ENGLISH TRANSLATION")
+                    }
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        OutlinedButton(onClick = onManageLanguages) {
+                            Text("MANAGE OFFLINE LANGUAGES")
+                        }
+                    }
+                }
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SmallLabel(if (state.mode == TaskMode.TRANSLATE_TO_ENGLISH) "ENGLISH TRANSLATION" else "TRANSCRIPT")
+                    SmallLabel(if (state.resultIsTranslation) "ENGLISH TRANSLATION" else "ORIGINAL TRANSCRIPT")
                     Spacer(Modifier.weight(1f))
                     Text(
                         if (editing) "DONE EDITING" else "EDIT WORDS",
@@ -256,6 +285,35 @@ fun ResultFirstScreen(
                             )
                         }
                         HorizontalDivider(color = screenBorder)
+                    }
+                }
+                if (state.resultIsTranslation) {
+                    Text(
+                        "Powered by ${state.translationProvider} · on-device",
+                        modifier = if (state.translationProvider == "Google Translate") {
+                            Modifier.clickable { uriHandler.openUri("https://translate.google.com") }
+                        } else Modifier,
+                        color = screenMuted,
+                        fontSize = 12.sp,
+                    )
+                    Text(
+                        "Automatic translation notice",
+                        modifier = Modifier.clickable { translationNoticeOpen = true },
+                        color = screenMuted,
+                        fontSize = 12.sp,
+                    )
+                    OutlinedButton(onClick = { originalExpanded = !originalExpanded }) {
+                        Text(if (originalExpanded) "HIDE ORIGINAL TRANSCRIPT" else "VIEW ORIGINAL TRANSCRIPT")
+                    }
+                    if (originalExpanded) {
+                        state.originalSegments.forEach { segment ->
+                            Text(
+                                "${TranscriptFormats.shortTime(segment.startSeconds)} – " +
+                                    "${TranscriptFormats.shortTime(segment.endSeconds)}  ${segment.text.trim()}",
+                                color = screenMuted,
+                                fontSize = 14.sp,
+                            )
+                        }
                     }
                 }
                 Text("Review names and important wording before sharing.", color = screenMuted, fontSize = 12.sp)
@@ -334,17 +392,29 @@ fun ResultFirstScreen(
                 ) {
                     if (busy) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     else Text(
-                        if (state.mode == TaskMode.TRANSCRIBE) "TRANSCRIBE SPEECH" else "TRANSLATE TO ENGLISH",
+                        if (state.mode == TaskMode.TRANSCRIBE) "TRANSCRIBE SPEECH" else "TRANSLATE LOCALLY",
                         fontWeight = FontWeight.Black,
                     )
                 }
                 Text(
-                    "Audio stays on your phone. Internet is used only to download a model.",
+                    "Audio and transcript stay on your phone. Model setup needs internet.",
                     color = screenMuted,
                     fontSize = 10.sp,
                 )
             }
         }
+    }
+    if (translationNoticeOpen) {
+        AlertDialog(
+            onDismissRequest = { translationNoticeOpen = false },
+            title = { Text("Automatic translation") },
+            text = {
+                Text("This service may contain translations powered by Google. Google disclaims all warranties related to the translations, express or implied, including any warranties of accuracy, reliability, and any implied warranties of merchantability, fitness for a particular purpose and noninfringement.")
+            },
+            confirmButton = {
+                Button(onClick = { translationNoticeOpen = false }) { Text("OK") }
+            },
+        )
     }
 }
 
